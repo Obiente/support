@@ -95,6 +95,93 @@ func (postgres *Postgres) Purge(ctx context.Context, id string, before time.Time
 	return nil
 }
 
+func (postgres *Postgres) AdminList(ctx context.Context, status *domain.ReportStatus, limit, offset int) ([]domain.Report, int, error) {
+	var statusValue any
+	if status != nil {
+		statusValue = string(*status)
+	}
+	var total int
+	if err := postgres.pool.QueryRow(ctx, `SELECT count(*) FROM support_reports
+		WHERE deleted_at IS NULL AND ($1::text IS NULL OR status = $1)`, statusValue).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := postgres.pool.Query(ctx, reportSelect+`
+		WHERE deleted_at IS NULL AND ($1::text IS NULL OR status = $1)
+		ORDER BY created_at DESC LIMIT $2 OFFSET $3`, statusValue, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	reports := make([]domain.Report, 0, limit)
+	for rows.Next() {
+		report, scanErr := scanReport(rows)
+		if scanErr != nil {
+			return nil, 0, scanErr
+		}
+		reports = append(reports, report)
+	}
+	return reports, total, rows.Err()
+}
+
+func (postgres *Postgres) AdminByID(ctx context.Context, id string) (domain.Report, error) {
+	return scanReport(postgres.pool.QueryRow(ctx, reportSelect+` WHERE id = $1 AND deleted_at IS NULL`, id))
+}
+
+func (postgres *Postgres) AdminUpdateStatus(ctx context.Context, id string, status domain.ReportStatus, now time.Time) (domain.Report, error) {
+	return scanReport(postgres.pool.QueryRow(ctx, `UPDATE support_reports SET status = $1, updated_at = $2
+		WHERE id = $3 AND deleted_at IS NULL
+		RETURNING id, support_code, product_id, request_type, status, private_payload,
+		capability_ciphertext, diagnostic_object_key, idempotency_hash, request_hash,
+		capability_hash, created_at, updated_at, retention_until, deleted_at`, status, now, id))
+}
+
+func (postgres *Postgres) CreateAdminSession(ctx context.Context, session domain.AdminSession) error {
+	_, err := postgres.pool.Exec(ctx, `INSERT INTO support_admin_sessions
+		(token_hash, csrf_hash, username, created_at, expires_at) VALUES ($1,$2,$3,$4,$5)`,
+		session.TokenHash, session.CSRFHash, session.Username, session.CreatedAt, session.ExpiresAt)
+	return err
+}
+
+func (postgres *Postgres) AdminSessionByHash(ctx context.Context, tokenHash []byte, now time.Time) (domain.AdminSession, error) {
+	var session domain.AdminSession
+	err := postgres.pool.QueryRow(ctx, `SELECT token_hash, csrf_hash, username, created_at, expires_at
+		FROM support_admin_sessions WHERE token_hash = $1 AND expires_at > $2`, tokenHash, now).Scan(
+		&session.TokenHash, &session.CSRFHash, &session.Username, &session.CreatedAt, &session.ExpiresAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.AdminSession{}, ErrNotFound
+	}
+	return session, err
+}
+
+func (postgres *Postgres) RotateAdminCSRF(ctx context.Context, tokenHash, csrfHash []byte) error {
+	result, err := postgres.pool.Exec(ctx, `UPDATE support_admin_sessions SET csrf_hash = $1 WHERE token_hash = $2`, csrfHash, tokenHash)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (postgres *Postgres) DeleteAdminSession(ctx context.Context, tokenHash []byte) error {
+	_, err := postgres.pool.Exec(ctx, `DELETE FROM support_admin_sessions WHERE token_hash = $1`, tokenHash)
+	return err
+}
+
+func (postgres *Postgres) DeleteExpiredAdminSessions(ctx context.Context, now time.Time) error {
+	_, err := postgres.pool.Exec(ctx, `DELETE FROM support_admin_sessions WHERE expires_at <= $1`, now)
+	return err
+}
+
+func (postgres *Postgres) RecordAdminAudit(ctx context.Context, audit domain.AdminAudit) error {
+	_, err := postgres.pool.Exec(ctx, `INSERT INTO support_admin_audit
+		(username, action, report_id, remote_hash, created_at) VALUES ($1,$2,$3,$4,$5)`,
+		audit.Username, audit.Action, audit.ReportID, audit.RemoteHash, audit.CreatedAt)
+	return err
+}
+
 const reportSelect = `SELECT id, support_code, product_id, request_type, status, private_payload,
 	capability_ciphertext, diagnostic_object_key, idempotency_hash, request_hash,
 	capability_hash, created_at, updated_at, retention_until, deleted_at FROM support_reports`

@@ -14,6 +14,7 @@ var objectKeyPattern = regexp.MustCompile(`^[a-f0-9]{64}\.enc$`)
 
 type Objects interface {
 	Put(key, reportID string, plaintext []byte) error
+	Get(key, reportID string) ([]byte, error)
 	Delete(key string) error
 }
 
@@ -64,6 +65,20 @@ func (objects *FileObjects) Put(key, reportID string, plaintext []byte) error {
 	return os.Rename(temporaryName, filepath.Join(objects.root, key))
 }
 
+func (objects *FileObjects) Get(key, reportID string) ([]byte, error) {
+	if !objectKeyPattern.MatchString(key) {
+		return nil, errors.New("invalid private object key")
+	}
+	ciphertext, err := os.ReadFile(filepath.Join(objects.root, key))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return objects.box.Open(ciphertext, []byte(reportID+":diagnostics"))
+}
+
 func (objects *FileObjects) Delete(key string) error {
 	if !objectKeyPattern.MatchString(key) {
 		return errors.New("invalid private object key")
@@ -84,6 +99,14 @@ func NewMemoryObjects() *MemoryObjects { return &MemoryObjects{Values: make(map[
 func (objects *MemoryObjects) Put(key, _ string, plaintext []byte) error {
 	objects.Values[key] = append([]byte(nil), plaintext...)
 	return nil
+}
+
+func (objects *MemoryObjects) Get(key, _ string) ([]byte, error) {
+	value, ok := objects.Values[key]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return append([]byte(nil), value...), nil
 }
 
 func (objects *MemoryObjects) Delete(key string) error {

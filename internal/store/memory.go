@@ -10,8 +10,9 @@ import (
 )
 
 type Memory struct {
-	mu      sync.Mutex
-	reports []domain.Report
+	mu       sync.Mutex
+	reports  []domain.Report
+	sessions []domain.AdminSession
 }
 
 func NewMemory() *Memory { return &Memory{} }
@@ -90,5 +91,104 @@ func (memory *Memory) Purge(_ context.Context, id string, before time.Time) erro
 	}
 	return ErrNotFound
 }
+
+func (memory *Memory) AdminList(_ context.Context, status *domain.ReportStatus, limit, offset int) ([]domain.Report, int, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	filtered := make([]domain.Report, 0, len(memory.reports))
+	for index := len(memory.reports) - 1; index >= 0; index-- {
+		report := memory.reports[index]
+		if report.DeletedAt == nil && (status == nil || report.Status == *status) {
+			filtered = append(filtered, report)
+		}
+	}
+	total := len(filtered)
+	if offset >= total {
+		return []domain.Report{}, total, nil
+	}
+	end := min(offset+limit, total)
+	return append([]domain.Report(nil), filtered[offset:end]...), total, nil
+}
+
+func (memory *Memory) AdminByID(_ context.Context, id string) (domain.Report, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	for _, report := range memory.reports {
+		if report.ID == id && report.DeletedAt == nil {
+			return report, nil
+		}
+	}
+	return domain.Report{}, ErrNotFound
+}
+
+func (memory *Memory) AdminUpdateStatus(_ context.Context, id string, status domain.ReportStatus, now time.Time) (domain.Report, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	for index, report := range memory.reports {
+		if report.ID == id && report.DeletedAt == nil {
+			memory.reports[index].Status = status
+			memory.reports[index].UpdatedAt = now
+			return memory.reports[index], nil
+		}
+	}
+	return domain.Report{}, ErrNotFound
+}
+
+func (memory *Memory) CreateAdminSession(_ context.Context, session domain.AdminSession) error {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	memory.sessions = append(memory.sessions, session)
+	return nil
+}
+
+func (memory *Memory) AdminSessionByHash(_ context.Context, tokenHash []byte, now time.Time) (domain.AdminSession, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	for _, session := range memory.sessions {
+		if bytes.Equal(session.TokenHash, tokenHash) && session.ExpiresAt.After(now) {
+			return session, nil
+		}
+	}
+	return domain.AdminSession{}, ErrNotFound
+}
+
+func (memory *Memory) RotateAdminCSRF(_ context.Context, tokenHash, csrfHash []byte) error {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	for index := range memory.sessions {
+		if bytes.Equal(memory.sessions[index].TokenHash, tokenHash) {
+			memory.sessions[index].CSRFHash = append([]byte(nil), csrfHash...)
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (memory *Memory) DeleteAdminSession(_ context.Context, tokenHash []byte) error {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	for index := range memory.sessions {
+		if bytes.Equal(memory.sessions[index].TokenHash, tokenHash) {
+			memory.sessions = append(memory.sessions[:index], memory.sessions[index+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (memory *Memory) DeleteExpiredAdminSessions(_ context.Context, now time.Time) error {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	kept := memory.sessions[:0]
+	for _, session := range memory.sessions {
+		if session.ExpiresAt.After(now) {
+			kept = append(kept, session)
+		}
+	}
+	memory.sessions = kept
+	return nil
+}
+
+func (memory *Memory) RecordAdminAudit(_ context.Context, _ domain.AdminAudit) error { return nil }
 
 func (memory *Memory) Close() {}

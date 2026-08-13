@@ -56,6 +56,43 @@ export interface PrivateStatus {
   retentionUntil: string
 }
 
+export interface AdminSession {
+  contractVersion: 1
+  username: string
+  csrfToken: string
+  expiresAt: string
+}
+
+export interface AdminReportSummary {
+  id: string
+  supportCode: string
+  productId: string
+  requestType: RequestType
+  status: string
+  source: 'web' | 'app'
+  title: string
+  hasDiagnostics: boolean
+  createdAt: string
+  updatedAt: string
+  retentionUntil: string
+}
+
+export interface AdminReportDetail extends AdminReportSummary {
+  description: string
+  contact?: string
+  release: ReportMetadata['release']
+}
+
+export interface AdminReportResponse {
+  contractVersion: 1
+  reports: AdminReportSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+let adminCSRFToken = ''
+
 interface Problem {
   code?: string
   message?: string
@@ -147,6 +184,57 @@ export async function deleteReceipt(receipt: Receipt): Promise<void> {
     throw new Error('The support service returned an invalid deletion link.')
   }
   await deletePrivateReport(match[1])
+}
+
+export async function adminLogin(username: string, password: string): Promise<AdminSession> {
+  const session = await adminJSON<AdminSession>('/api/v1/admin/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  adminCSRFToken = session.csrfToken
+  return session
+}
+
+export async function loadAdminSession(): Promise<AdminSession> {
+  const session = await adminJSON<AdminSession>('/api/v1/admin/session')
+  adminCSRFToken = session.csrfToken
+  return session
+}
+
+export async function adminLogout(): Promise<void> {
+  await adminJSON('/api/v1/admin/logout', {
+    method: 'POST', headers: { 'X-CSRF-Token': adminCSRFToken },
+  }, true)
+  adminCSRFToken = ''
+}
+
+export async function loadAdminReports(status = ''): Promise<AdminReportResponse> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : ''
+  return adminJSON<AdminReportResponse>(`/api/v1/admin/reports${query}`)
+}
+
+export async function loadAdminReport(id: string): Promise<AdminReportDetail> {
+  return adminJSON<AdminReportDetail>(`/api/v1/admin/reports/${encodeURIComponent(id)}`)
+}
+
+export async function updateAdminReportStatus(id: string, status: string): Promise<AdminReportDetail> {
+  return adminJSON<AdminReportDetail>(`/api/v1/admin/reports/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': adminCSRFToken },
+    body: JSON.stringify({ status }),
+  })
+}
+
+export function adminDiagnosticsURL(id: string): string {
+  return `/api/v1/admin/reports/${encodeURIComponent(id)}/diagnostics`
+}
+
+async function adminJSON<T = unknown>(path: string, init: RequestInit = {}, noContent = false): Promise<T> {
+  const response = await fetch(path, { ...init, credentials: 'same-origin', headers: { Accept: 'application/json', ...init.headers } })
+  if (!response.ok) throw await apiError(response)
+  if (noContent) return undefined as T
+  return (await response.json()) as T
 }
 
 async function apiError(response: Response): Promise<SupportApiError> {

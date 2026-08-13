@@ -7,6 +7,8 @@ services:
       SUPPORT_PUBLIC_URL: "${SUPPORT_PUBLIC_URL:-http://localhost:8080}"
       SUPPORT_ENVIRONMENT: "${SUPPORT_ENVIRONMENT:-development}"
       SUPPORT_DATA_KEY: "${SUPPORT_DATA_KEY:?set SUPPORT_DATA_KEY}"
+      SUPPORT_ADMIN_USERNAME: "${SUPPORT_ADMIN_USERNAME:-admin}"
+      SUPPORT_ADMIN_PASSWORD_HASH: "${SUPPORT_ADMIN_PASSWORD_HASH:?set SUPPORT_ADMIN_PASSWORD_HASH}"
       DATABASE_URL: "postgres://support:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@database:5432/support?sslmode=disable"
     depends_on:
       database:

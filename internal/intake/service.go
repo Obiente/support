@@ -219,6 +219,104 @@ func (service *Service) PurgeExpired(ctx context.Context, limit int) error {
 	return errors.Join(purgeErrors...)
 }
 
+func (service *Service) AdminList(ctx context.Context, status *domain.ReportStatus, limit, offset int) ([]domain.AdminReportSummary, int, error) {
+	if limit < 1 || limit > 100 || offset < 0 || status != nil && !status.Valid() {
+		return nil, 0, ErrInvalid
+	}
+	reports, total, err := service.reports.AdminList(ctx, status, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	result := make([]domain.AdminReportSummary, 0, len(reports))
+	for _, report := range reports {
+		payload, openErr := service.openPrivatePayload(report)
+		if openErr != nil {
+			return nil, 0, openErr
+		}
+		result = append(result, adminSummary(report, payload))
+	}
+	return result, total, nil
+}
+
+func (service *Service) AdminDetail(ctx context.Context, id string) (domain.AdminReportDetail, error) {
+	report, err := service.reports.AdminByID(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return domain.AdminReportDetail{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.AdminReportDetail{}, err
+	}
+	payload, err := service.openPrivatePayload(report)
+	if err != nil {
+		return domain.AdminReportDetail{}, err
+	}
+	return domain.AdminReportDetail{
+		AdminReportSummary: adminSummary(report, payload),
+		Description:        payload.Description,
+		Contact:            payload.Contact,
+		Release:            payload.Release,
+	}, nil
+}
+
+func (service *Service) AdminDiagnostics(ctx context.Context, id string) ([]byte, string, error) {
+	report, err := service.reports.AdminByID(ctx, id)
+	if errors.Is(err, store.ErrNotFound) || err == nil && report.DiagnosticObjectKey == nil {
+		return nil, "", ErrNotFound
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	content, err := service.objects.Get(*report.DiagnosticObjectKey, report.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, "", ErrNotFound
+	}
+	return content, report.SupportCode + "-diagnostics.zip", err
+}
+
+func (service *Service) AdminUpdateStatus(ctx context.Context, id string, status domain.ReportStatus) (domain.AdminReportDetail, error) {
+	if !status.Valid() {
+		return domain.AdminReportDetail{}, ErrInvalid
+	}
+	report, err := service.reports.AdminUpdateStatus(ctx, id, status, service.now())
+	if errors.Is(err, store.ErrNotFound) {
+		return domain.AdminReportDetail{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.AdminReportDetail{}, err
+	}
+	payload, err := service.openPrivatePayload(report)
+	if err != nil {
+		return domain.AdminReportDetail{}, err
+	}
+	return domain.AdminReportDetail{
+		AdminReportSummary: adminSummary(report, payload),
+		Description:        payload.Description,
+		Contact:            payload.Contact,
+		Release:            payload.Release,
+	}, nil
+}
+
+func (service *Service) openPrivatePayload(report domain.Report) (domain.PrivatePayload, error) {
+	plaintext, err := service.box.Open(report.PrivatePayload, []byte(report.ID+":payload"))
+	if err != nil {
+		return domain.PrivatePayload{}, err
+	}
+	var payload domain.PrivatePayload
+	if err := json.Unmarshal(plaintext, &payload); err != nil {
+		return domain.PrivatePayload{}, err
+	}
+	return payload, nil
+}
+
+func adminSummary(report domain.Report, payload domain.PrivatePayload) domain.AdminReportSummary {
+	return domain.AdminReportSummary{
+		ID: report.ID, SupportCode: report.SupportCode, ProductID: report.ProductID,
+		RequestType: report.RequestType, Status: report.Status, Source: payload.Source,
+		Title: payload.Title, HasDiagnostics: report.DiagnosticObjectKey != nil,
+		CreatedAt: report.CreatedAt, UpdatedAt: report.UpdatedAt, RetentionUntil: report.RetentionUntil,
+	}
+}
+
 func (service *Service) receipt(report domain.Report) (domain.Receipt, error) {
 	capability, err := service.box.Open(report.CapabilityCiphertext, []byte(report.ID+":capability"))
 	if err != nil {

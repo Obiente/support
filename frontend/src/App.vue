@@ -6,18 +6,19 @@ import { RouterLink, RouterView } from 'vue-router'
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="site-header">
     <RouterLink class="brand" to="/" aria-label="Obiente Support home">
-      <span class="brand-mark" aria-hidden="true">O</span>
-      <span><strong>Obiente</strong><small>Support</small></span>
+      <strong>Obiente</strong>
+      <span>Support</span>
     </RouterLink>
     <nav aria-label="Support navigation">
-      <RouterLink to="/#how-it-works">How it works</RouterLink>
       <a href="https://obiente.org">Obiente.org</a>
+      <a href="https://github.com/Obiente/support">Source code</a>
     </nav>
   </header>
   <RouterView />
   <footer>
     <span>Obiente Support</span>
-    <span>Private, human-reviewed product support.</span>
+    <span>Private support for every Obiente project.</span>
+    <RouterLink to="/admin/login">Maintainer sign in</RouterLink>
     <a href="https://github.com/Obiente/support">Source code</a>
   </footer>
 </template>

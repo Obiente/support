@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { deleteReceipt, loadProducts, randomIdempotencyKey, reconcileReceipt } from './support'
+import { adminLogin, deleteReceipt, loadProducts, randomIdempotencyKey, reconcileReceipt, updateAdminReportStatus } from './support'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -60,5 +60,44 @@ describe('support contract client', () => {
       createdAt: '2026-08-13T12:00:00Z',
       retentionUntil: '2026-09-12T12:00:00Z',
     })).rejects.toThrow('invalid deletion link')
+  })
+
+  it('keeps the admin session in an HTTP-only cookie and sends CSRF only on mutations', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        contractVersion: 1,
+        username: 'maintainer',
+        csrfToken: 'A'.repeat(43),
+        expiresAt: '2026-08-14T00:00:00Z',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: '11111111-1111-4111-8111-111111111111',
+        supportCode: 'OBI-ABCDE-23456',
+        productId: 'synthetic-product',
+        requestType: 'bug',
+        status: 'accepted',
+        source: 'app',
+        title: 'Synthetic failure',
+        hasDiagnostics: true,
+        createdAt: '2026-08-13T12:00:00Z',
+        updatedAt: '2026-08-13T13:00:00Z',
+        retentionUntil: '2026-09-12T12:00:00Z',
+        description: 'Synthetic diagnostic report.',
+        release: { version: '1.0.0', platform: 'linux' },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetch)
+
+    await adminLogin('maintainer', 'secret')
+    await updateAdminReportStatus('11111111-1111-4111-8111-111111111111', 'accepted')
+
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/admin/login', expect.objectContaining({
+      credentials: 'same-origin',
+      method: 'POST',
+    }))
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/admin/reports/11111111-1111-4111-8111-111111111111', expect.objectContaining({
+      credentials: 'same-origin',
+      method: 'PATCH',
+      headers: expect.objectContaining({ 'X-CSRF-Token': 'A'.repeat(43) }),
+    }))
   })
 })

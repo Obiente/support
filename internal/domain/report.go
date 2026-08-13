@@ -8,6 +8,11 @@ const (
 	MaxDiagnosticArchiveBytes = 4 * 1024 * 1024
 )
 
+func (value ReportStatus) Valid() bool {
+	return value == StatusNew || value == StatusNeedsInformation || value == StatusAccepted ||
+		value == StatusDuplicate || value == StatusResolved || value == StatusRejected
+}
+
 type RequestType string
 
 const (

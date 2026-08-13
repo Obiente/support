@@ -110,6 +110,36 @@ func TestPurgeExpiredRemovesEncryptedObjectAndRow(t *testing.T) {
 	}
 }
 
+func TestAdminReviewDecryptsOnlyRequestedPrivateData(t *testing.T) {
+	service, _, _ := testService(t)
+	receipt, err := service.Submit(context.Background(), validSubmission(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reports, total, err := service.AdminList(context.Background(), nil, 25, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(reports) != 1 || reports[0].SupportCode != receipt.SupportCode || reports[0].Source != "app" {
+		t.Fatalf("admin list = %#v, total %d", reports, total)
+	}
+	detail, err := service.AdminDetail(context.Background(), reports[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Description != "The synthetic action did not complete." || !detail.HasDiagnostics {
+		t.Fatalf("admin detail = %#v", detail)
+	}
+	archive, filename, err := service.AdminDiagnostics(context.Background(), reports[0].ID)
+	if err != nil || len(archive) == 0 || filename != receipt.SupportCode+"-diagnostics.zip" {
+		t.Fatalf("admin diagnostics = %q bytes, %q, %v", len(archive), filename, err)
+	}
+	updated, err := service.AdminUpdateStatus(context.Background(), reports[0].ID, domain.StatusAccepted)
+	if err != nil || updated.Status != domain.StatusAccepted {
+		t.Fatalf("admin update = %#v, %v", updated, err)
+	}
+}
+
 func testService(t *testing.T) (*Service, *store.Memory, *store.MemoryObjects) {
 	t.Helper()
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))

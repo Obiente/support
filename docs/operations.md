@@ -8,10 +8,20 @@
 - `DATABASE_URL`: PostgreSQL connection with a dedicated least-privilege database user.
 - `SUPPORT_OBJECT_ROOT`: optional object-root override. The production image uses `/data/private`; mount the persistent private-data volume at `/data`.
 - `SUPPORT_WEB_ROOT`: built Vue distribution included in the production image.
+- `SUPPORT_ADMIN_USERNAME`: the initial maintainer username. Use a distinct non-email identifier.
+- `SUPPORT_ADMIN_PASSWORD_HASH`: a bcrypt hash, never a plaintext password. Generate one with `htpasswd -bnBC 12 admin 'a-long-password' | cut -d: -f2`.
 
 Terminate HTTPS at a trusted reverse proxy. Do not expose PostgreSQL or the private object volume. Do not enable request-body logging at the proxy.
 
 The production image builds both the Vue portal and Go service and declares a Docker health check against `GET /healthz`. The probe uses `SUPPORT_ADDRESS` when set and defaults to port 8080. It does not require a shell or additional utility in the final image.
+
+## Maintainer access
+
+The maintainer console is available at `/admin/login`. Successful logins create a random server-side session lasting 12 hours. The browser receives an HTTP-only, SameSite-strict cookie; production cookies are also marked secure. Admin state changes require a separate rotating CSRF token.
+
+Five failed login attempts from one observed network address block further attempts for 15 minutes in that service process. Put an additional distributed rate limit at the trusted reverse proxy when running more than one replica. Do not expose the admin API through a separate origin.
+
+Changing `SUPPORT_ADMIN_PASSWORD_HASH` affects new logins but does not revoke existing sessions. To force sign-out after a credential incident, delete rows from `support_admin_sessions` as a separately authorized operational action, then rotate the password hash. Audit rows in `support_admin_audit` must follow the same access controls and backup policy as support reports.
 
 ## Backups
 

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/obiente/support/internal/admin"
 	"github.com/obiente/support/internal/config"
 	"github.com/obiente/support/internal/cryptobox"
 	"github.com/obiente/support/internal/intake"
@@ -92,13 +93,14 @@ func run(logger *slog.Logger) error {
 	}
 	registry := products.Default()
 	intakeService := intake.New(reports, objects, registry, box, configuration.PublicURL)
+	adminService := admin.New(reports, configuration.AdminUsername, configuration.AdminPasswordHash)
 	if err := intakeService.PurgeExpired(startupContext, 250); err != nil {
 		logger.Warn("initial private-data retention purge did not complete", "error", err)
 	}
 	retentionContext, retentionCancel := context.WithCancel(context.Background())
 	defer retentionCancel()
 	go runRetention(retentionContext, intakeService, logger)
-	webServer, err := web.New(intakeService, registry, logger, configuration.WebRoot)
+	webServer, err := web.New(intakeService, adminService, registry, logger, configuration.WebRoot, configuration.SecureCookies)
 	if err != nil {
 		return err
 	}

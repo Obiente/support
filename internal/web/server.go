@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obiente/support/internal/admin"
 	"github.com/obiente/support/internal/domain"
 	"github.com/obiente/support/internal/intake"
 	"github.com/obiente/support/internal/products"
@@ -21,13 +22,16 @@ import (
 const maxRequestBytes = domain.MaxDiagnosticArchiveBytes + domain.MaxMetadataBytes + 256*1024
 
 type Server struct {
-	intake   *intake.Service
-	products *products.Registry
-	logger   *slog.Logger
-	webRoot  string
+	intake        *intake.Service
+	products      *products.Registry
+	logger        *slog.Logger
+	webRoot       string
+	admin         *admin.Service
+	secureCookies bool
+	loginAttempts *loginLimiter
 }
 
-func New(intakeService *intake.Service, registry *products.Registry, logger *slog.Logger, webRoot string) (*Server, error) {
+func New(intakeService *intake.Service, adminService *admin.Service, registry *products.Registry, logger *slog.Logger, webRoot string, secureCookies bool) (*Server, error) {
 	absoluteRoot, err := filepath.Abs(webRoot)
 	if err != nil {
 		return nil, fmt.Errorf("resolve support web root: %w", err)
@@ -35,7 +39,10 @@ func New(intakeService *intake.Service, registry *products.Registry, logger *slo
 	if _, err := os.Stat(filepath.Join(absoluteRoot, "index.html")); err != nil {
 		return nil, fmt.Errorf("support web build is unavailable: %w", err)
 	}
-	return &Server{intake: intakeService, products: registry, logger: logger, webRoot: absoluteRoot}, nil
+	return &Server{
+		intake: intakeService, admin: adminService, products: registry, logger: logger,
+		webRoot: absoluteRoot, secureCookies: secureCookies, loginAttempts: newLoginLimiter(),
+	}, nil
 }
 
 func (server *Server) Handler() http.Handler {
@@ -46,6 +53,13 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/receipts", server.reconcileReceipt)
 	mux.HandleFunc("GET /api/v1/reports/{capability}", server.reportStatus)
 	mux.HandleFunc("DELETE /api/v1/reports/{capability}", server.deleteReport)
+	mux.HandleFunc("POST /api/v1/admin/login", server.adminLogin)
+	mux.HandleFunc("GET /api/v1/admin/session", server.adminSession)
+	mux.HandleFunc("POST /api/v1/admin/logout", server.adminLogout)
+	mux.HandleFunc("GET /api/v1/admin/reports", server.adminReports)
+	mux.HandleFunc("GET /api/v1/admin/reports/{id}", server.adminReport)
+	mux.HandleFunc("PATCH /api/v1/admin/reports/{id}", server.adminUpdateReport)
+	mux.HandleFunc("GET /api/v1/admin/reports/{id}/diagnostics", server.adminDiagnostics)
 	mux.Handle("GET /", server.spa())
 	return securityHeaders(mux)
 }
@@ -218,7 +232,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		response.Header().Set("X-Frame-Options", "DENY")
 		response.Header().Set("Referrer-Policy", "no-referrer")
 		response.Header().Set("Permissions-Policy", "camera=(), geolocation=(), microphone=(), payment=(), usb=()")
-		if strings.HasPrefix(request.URL.Path, "/api/") || strings.HasPrefix(request.URL.Path, "/r/") {
+		if strings.HasPrefix(request.URL.Path, "/api/") || strings.HasPrefix(request.URL.Path, "/r/") || strings.HasPrefix(request.URL.Path, "/admin") {
 			response.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
 		}
 		next.ServeHTTP(response, request)

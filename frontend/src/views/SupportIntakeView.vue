@@ -139,46 +139,55 @@ async function copyCode() {
 <template>
   <main id="main-content">
     <section class="hero">
-      <div class="eyebrow">Help for every Obiente project</div>
-      <h1>Tell us what happened.<br><span>GitHub is optional.</span></h1>
+      <div class="eyebrow">Obiente Support</div>
+      <h1>Tell us what happened</h1>
       <p class="hero-copy">Report a problem, request a feature, or ask for help. Your submission stays private until a maintainer reviews anything that could become public.</p>
-      <div class="trust-row" aria-label="Privacy commitments">
-        <span>Private by default</span><span>No account required</span><span>Delete with your private link</span>
+    </section>
+
+    <section class="app-submission" aria-labelledby="app-submission-title">
+      <div>
+        <div class="eyebrow">Send diagnostics from the app</div>
+        <h2 id="app-submission-title">No ZIP download needed</h2>
+      </div>
+      <div class="app-submission-copy">
+        <p>In Nextcloud Native, open <strong>Settings</strong>, then <strong>Diagnostics</strong>. Review the anonymized report and choose <strong>Send to support</strong>.</p>
+        <p>The app shows what is included before anything leaves your device. Nothing is uploaded automatically.</p>
       </div>
     </section>
 
     <section class="intake-layout" aria-labelledby="form-title">
-      <div class="form-intro">
-        <div class="eyebrow">Start a request</div>
-        <h2 id="form-title">What can we help with?</h2>
-        <p>Only the details you enter are submitted. Diagnostic files are never attached by the website unless you choose one.</p>
-        <ol id="how-it-works" class="steps">
-          <li><span>1</span><div><strong>Send privately</strong><small>Your request enters a private moderation queue.</small></div></li>
-          <li><span>2</span><div><strong>Keep your support code</strong><small>The private status link lets you follow or delete it.</small></div></li>
-          <li><span>3</span><div><strong>Public only after review</strong><small>Diagnostics and contact details are never published.</small></div></li>
-        </ol>
+      <div class="form-heading">
+        <div>
+          <div class="eyebrow">Web form</div>
+          <h2 id="form-title">Send a private request</h2>
+        </div>
+        <p>Use this form for general support, feature requests, or to upload a diagnostic ZIP manually.</p>
       </div>
 
-      <div class="form-shell">
+      <div class="form-surface">
         <form v-if="!receipt" id="support-form" @submit.prevent="send">
+          <div class="field-grid">
+            <label class="field"><span>What product is this about?</span><small>Choose the Obiente project this request is related to.</small><select v-model="productId" required :disabled="loadingProducts || sending"><option v-if="loadingProducts" value="">Loading products...</option><option v-for="product in products" :key="product.id" :value="product.id">{{ product.name }}</option></select></label>
+            <label class="field"><span>Version <em>optional</em></span><small>Add the version if you know it.</small><input v-model="version" maxlength="80" autocomplete="off" :disabled="sending" placeholder="For example 0.1.0-alpha.2"></label>
+          </div>
+
           <fieldset class="request-types" :disabled="sending">
-            <legend>Request type</legend>
-            <label><input v-model="requestType" type="radio" value="bug"><span><b>Report a bug</b><small>Something is not working</small></span></label>
-            <label><input v-model="requestType" type="radio" value="feature"><span><b>Request a feature</b><small>Suggest an improvement</small></span></label>
-            <label><input v-model="requestType" type="radio" value="support"><span><b>Ask for help</b><small>Get general assistance</small></span></label>
+            <legend>What type of request is this?</legend>
+            <small>This helps us route your request to the right person.</small>
+            <div>
+              <label><input v-model="requestType" type="radio" value="bug"><span>Report a problem</span></label>
+              <label><input v-model="requestType" type="radio" value="feature"><span>Request a feature</span></label>
+              <label><input v-model="requestType" type="radio" value="support"><span>Ask for help</span></label>
+            </div>
           </fieldset>
 
-          <div class="field-grid">
-            <label class="field"><span>Product</span><select v-model="productId" required :disabled="loadingProducts || sending"><option v-if="loadingProducts" value="">Loading products...</option><option v-for="product in products" :key="product.id" :value="product.id">{{ product.name }}</option></select></label>
-            <label class="field"><span>Version <em>optional</em></span><input v-model="version" maxlength="80" autocomplete="off" :disabled="sending" placeholder="For example 0.1.0-alpha.2"></label>
-          </div>
-          <label class="field"><span>Short summary</span><input v-model="title" required minlength="4" maxlength="160" :disabled="sending" placeholder="What needs attention?"></label>
-          <label class="field"><span>Details</span><textarea v-model="description" required minlength="10" maxlength="8000" rows="7" :disabled="sending" placeholder="What did you do, what did you expect, and what happened instead?"></textarea><small>Do not include passwords, access tokens, or private file contents.</small></label>
-          <label class="field"><span>Contact method <em>optional</em></span><input v-model="contact" maxlength="320" autocomplete="email" :disabled="sending" placeholder="Email address or another way to reach you"><small>Anonymous requests are welcome, but we cannot ask follow-up questions.</small></label>
-          <label v-if="diagnosticsSupported" class="field diagnostic-field"><span>Diagnostic report <em>optional</em></span><input type="file" accept="application/zip,.zip" :disabled="sending" @change="chooseDiagnostics"><small>Maximum 4 MiB. Diagnostic files stay private and expire automatically.</small></label>
+          <label class="field"><span>Short summary</span><small>A clear title helps us understand your request.</small><input v-model="title" required minlength="4" maxlength="160" :disabled="sending" placeholder="Summarize the issue or request in a few words"></label>
+          <label class="field"><span>Details</span><small>Share what you did, what you expected, and what happened instead.</small><textarea v-model="description" required minlength="10" maxlength="8000" rows="5" :disabled="sending" placeholder="Provide as much useful detail as you can."></textarea><small>Do not include passwords, access tokens, or private file contents.</small></label>
+          <label class="field"><span>Contact method <em>optional</em></span><small>We only use this to follow up about your request.</small><input v-model="contact" maxlength="320" autocomplete="email" :disabled="sending" placeholder="Email address or another way to reach you"><small>Anonymous requests are welcome, but we cannot ask follow-up questions.</small></label>
+          <label v-if="diagnosticsSupported" class="field diagnostic-field"><span>Upload a diagnostic ZIP <em>optional</em></span><small>If direct sending from the app is unavailable, attach the ZIP you saved from its diagnostics screen.</small><input type="file" accept="application/zip,.zip" :disabled="sending" @change="chooseDiagnostics"><small>Maximum 4 MiB. Diagnostic files stay private and expire automatically.</small></label>
           <label class="consent"><input v-model="privacyAccepted" type="checkbox" required :disabled="sending"><span>I understand this request is sent privately to Obiente Support. I have removed secrets and information I do not want to share.</span></label>
           <div class="submit-actions">
-            <button class="primary" type="submit" :disabled="sending || loadingProducts"><span>{{ sending ? progressLabel : 'Send private request' }}</span><span aria-hidden="true">&#8594;</span></button>
+            <button class="primary" type="submit" :disabled="sending || loadingProducts">{{ sending ? progressLabel : 'Send private request' }}</button>
             <button v-if="sending" class="secondary" type="button" @click="cancel">Cancel</button>
           </div>
           <progress v-if="sending && progress !== undefined" :value="progress" max="1"><span>{{ Math.round(progress * 100) }}%</span></progress>
@@ -186,7 +195,6 @@ async function copyCode() {
         </form>
 
         <section v-else class="receipt" tabindex="-1">
-          <div class="receipt-icon" aria-hidden="true">&#10003;</div>
           <div class="eyebrow">Request received</div>
           <h2>Keep this support code</h2>
           <output class="support-code">{{ receipt.supportCode }}</output>
