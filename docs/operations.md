@@ -11,6 +11,8 @@
 
 Terminate HTTPS at a trusted reverse proxy. Do not expose PostgreSQL or the private object volume. Do not enable request-body logging at the proxy.
 
+The production image builds both the Vue portal and Go service and declares a Docker health check against `GET /healthz`. The probe uses `SUPPORT_ADDRESS` when set and defaults to port 8080. It does not require a shell or additional utility in the final image.
+
 ## Backups
 
 Back up PostgreSQL and the private object volume as one retention unit. Encrypt backups independently from `SUPPORT_DATA_KEY`, restrict operator access, and apply the same deletion schedule to expired backups. A restore test must verify that database object keys and encrypted files remain consistent.

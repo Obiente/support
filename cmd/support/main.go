@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,10 +22,49 @@ import (
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if len(os.Args) == 2 && os.Args[1] == "healthcheck" {
+		if err := checkHealth(os.Getenv("SUPPORT_ADDRESS")); err != nil {
+			logger.Error("support health check failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(logger); err != nil {
 		logger.Error("support service stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func checkHealth(address string) error {
+	probeURL, err := healthcheckURL(address)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get(probeURL)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return errors.New("support health endpoint returned a non-success status")
+	}
+	return nil
+}
+
+func healthcheckURL(address string) (string, error) {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		address = ":8080"
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return "", err
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port) + "/healthz", nil
 }
 
 func run(logger *slog.Logger) error {
