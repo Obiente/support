@@ -7,7 +7,6 @@ services:
       SUPPORT_PUBLIC_URL: "${SUPPORT_PUBLIC_URL:-http://localhost:8080}"
       SUPPORT_ENVIRONMENT: "${SUPPORT_ENVIRONMENT:-development}"
       SUPPORT_OBJECT_ROOT: /var/lib/obiente-support/private
-      SUPPORT_WEB_ROOT: /srv/support-web
       SUPPORT_DATA_KEY: "${SUPPORT_DATA_KEY:?set SUPPORT_DATA_KEY}"
       DATABASE_URL: "postgres://support:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@database:5432/support?sslmode=disable"
     depends_on:

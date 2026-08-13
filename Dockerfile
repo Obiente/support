@@ -14,13 +14,11 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/support ./cmd/supp
 RUN mkdir -p /out/private
 
 FROM gcr.io/distroless/static-debian12:nonroot
+WORKDIR /home/nonroot
 COPY --from=build /out/support /support
-COPY --from=frontend /src/frontend/dist /srv/support-web
-COPY --chown=65532:65532 --from=build /out/private /var/lib/obiente-support/private
-ENV SUPPORT_WEB_ROOT=/srv/support-web \
-    SUPPORT_OBJECT_ROOT=/var/lib/obiente-support/private \
-    SUPPORT_PUBLIC_URL=https://support.obiente.org
-VOLUME ["/var/lib/obiente-support/private"]
+COPY --from=frontend /src/frontend/dist ./frontend/dist
+COPY --chown=65532:65532 --from=build /out/private ./data/private
+VOLUME ["/home/nonroot/data/private"]
 EXPOSE 8080
 USER nonroot:nonroot
 ENTRYPOINT ["/support"]
