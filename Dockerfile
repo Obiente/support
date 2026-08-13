@@ -18,7 +18,8 @@ COPY --from=build /out/support /support
 COPY --from=frontend /src/frontend/dist /srv/support-web
 COPY --chown=65532:65532 --from=build /out/private /var/lib/obiente-support/private
 ENV SUPPORT_WEB_ROOT=/srv/support-web \
-    SUPPORT_OBJECT_ROOT=/var/lib/obiente-support/private
+    SUPPORT_OBJECT_ROOT=/var/lib/obiente-support/private \
+    SUPPORT_PUBLIC_URL=https://support.obiente.org
 VOLUME ["/var/lib/obiente-support/private"]
 EXPOSE 8080
 USER nonroot:nonroot
