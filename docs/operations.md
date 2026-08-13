@@ -6,7 +6,7 @@
 - `SUPPORT_ENVIRONMENT=production`: rejects a non-HTTPS public URL.
 - `SUPPORT_DATA_KEY`: base64-encoded 32-byte key from a cryptographically secure source.
 - `DATABASE_URL`: PostgreSQL connection with a dedicated least-privilege database user.
-- `SUPPORT_OBJECT_ROOT`: private persistent volume writable only by the service user.
+- `SUPPORT_OBJECT_ROOT`: optional object-root override. The production image uses `/data/private`; mount the persistent private-data volume at `/data`.
 - `SUPPORT_WEB_ROOT`: built Vue distribution included in the production image.
 
 Terminate HTTPS at a trusted reverse proxy. Do not expose PostgreSQL or the private object volume. Do not enable request-body logging at the proxy.

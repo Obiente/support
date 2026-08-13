@@ -60,6 +60,8 @@ For the production-shaped single-container build:
 docker compose up --build
 ```
 
+The support image contains both the built Vue portal and Go service. Mount persistent encrypted report storage at `/data`; the service stores diagnostic objects under `/data/private`. Runtime configuration is supplied through environment variables and is not built into the image.
+
 ## Validation
 
 ```bash

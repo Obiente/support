@@ -6,7 +6,6 @@ services:
       SUPPORT_ADDRESS: ":8080"
       SUPPORT_PUBLIC_URL: "${SUPPORT_PUBLIC_URL:-http://localhost:8080}"
       SUPPORT_ENVIRONMENT: "${SUPPORT_ENVIRONMENT:-development}"
-      SUPPORT_OBJECT_ROOT: /var/lib/obiente-support/private
       SUPPORT_DATA_KEY: "${SUPPORT_DATA_KEY:?set SUPPORT_DATA_KEY}"
       DATABASE_URL: "postgres://support:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@database:5432/support?sslmode=disable"
     depends_on:
@@ -15,7 +14,7 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
-      - private_reports:/var/lib/obiente-support/private
+      - private_reports:/data
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
