@@ -1,0 +1,173 @@
+openapi: 3.1.0
+info:
+  title: Obiente Support Intake API
+  version: 1.0.0
+  description: Product-neutral private support intake. All successful report submissions require explicit user confirmation in the calling client.
+servers:
+  - url: https://support.obiente.org
+paths:
+  /api/v1/products:
+    get:
+      operationId: listProducts
+      responses:
+        "200":
+          description: Registered products and their diagnostic constraints.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductResponse"
+  /api/v1/reports:
+    post:
+      operationId: createReport
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [metadata]
+              properties:
+                metadata:
+                  $ref: "#/components/schemas/ReportMetadata"
+                diagnostics:
+                  type: string
+                  format: binary
+                  maxLength: 4194304
+      responses:
+        "201":
+          description: Private report receipt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /api/v1/receipts:
+    get:
+      operationId: reconcileReceipt
+      description: Reconcile an ambiguous submission outcome without creating another report.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Existing private report receipt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/reports/{capability}:
+    parameters:
+      - name: capability
+        in: path
+        required: true
+        schema: { type: string, minLength: 43, maxLength: 43 }
+    get:
+      operationId: getPrivateReportStatus
+      responses:
+        "200":
+          description: Private report state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivateStatus"
+        "404": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deletePrivateReport
+      responses:
+        "200":
+          description: The private report was revoked and its diagnostic object removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivateStatus"
+        "404": { $ref: "#/components/responses/Problem" }
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{32,128}$" }
+  responses:
+    Problem:
+      description: A bounded, user-safe error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    ProductResponse:
+      type: object
+      required: [contractVersion, products]
+      properties:
+        contractVersion: { const: 1 }
+        products:
+          type: array
+          items: { $ref: "#/components/schemas/Product" }
+    Product:
+      type: object
+      required: [id, name, description, diagnosticContentTypes, diagnosticEntries, diagnosticMaxBytes, diagnosticMaxExpandedBytes, retentionDays]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        repository: { type: string }
+        diagnosticContentTypes: { type: array, items: { type: string } }
+        diagnosticEntries: { type: array, items: { type: string } }
+        diagnosticMaxBytes: { type: integer, minimum: 0 }
+        diagnosticMaxExpandedBytes: { type: integer, minimum: 0 }
+        retentionDays: { type: integer, minimum: 1 }
+    ReportMetadata:
+      type: object
+      required: [contractVersion, productId, requestType, title, description, source, release, privacyAccepted]
+      properties:
+        contractVersion: { const: 1 }
+        productId: { type: string }
+        requestType: { enum: [bug, feature, support] }
+        title: { type: string, minLength: 4, maxLength: 160 }
+        description: { type: string, minLength: 10, maxLength: 8000 }
+        contact: { type: string, maxLength: 320 }
+        source: { enum: [web, app] }
+        privacyAccepted: { const: true }
+        release:
+          type: object
+          required: [version, platform]
+          properties:
+            version: { type: string, maxLength: 80 }
+            channel: { type: string, maxLength: 40 }
+            platform: { type: string, maxLength: 60 }
+            osVersion: { type: string, maxLength: 120 }
+            architecture: { type: string, maxLength: 40 }
+    Receipt:
+      type: object
+      required: [contractVersion, supportCode, status, statusUrl, deletionUrl, createdAt, retentionUntil]
+      properties:
+        contractVersion: { const: 1 }
+        supportCode: { type: string }
+        status: { type: string }
+        statusUrl: { type: string, format: uri }
+        deletionUrl: { type: string, format: uri }
+        createdAt: { type: string, format: date-time }
+        retentionUntil: { type: string, format: date-time }
+    PrivateStatus:
+      type: object
+      required: [contractVersion, supportCode, productId, requestType, status, createdAt, updatedAt, retentionUntil]
+      properties:
+        contractVersion: { const: 1 }
+        supportCode: { type: string }
+        productId: { type: string }
+        requestType: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        retentionUntil: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [contractVersion, code, message]
+      properties:
+        contractVersion: { const: 1 }
+        code: { type: string }
+        message: { type: string }

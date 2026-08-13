@@ -1,0 +1,47 @@
+services:
+  support:
+    build: .
+    restart: unless-stopped
+    environment:
+      SUPPORT_ADDRESS: ":8080"
+      SUPPORT_PUBLIC_URL: "${SUPPORT_PUBLIC_URL:-http://localhost:8080}"
+      SUPPORT_ENVIRONMENT: "${SUPPORT_ENVIRONMENT:-development}"
+      SUPPORT_OBJECT_ROOT: /var/lib/obiente-support/private
+      SUPPORT_WEB_ROOT: /srv/support-web
+      SUPPORT_DATA_KEY: "${SUPPORT_DATA_KEY:?set SUPPORT_DATA_KEY}"
+      DATABASE_URL: "postgres://support:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@database:5432/support?sslmode=disable"
+    depends_on:
+      database:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - private_reports:/var/lib/obiente-support/private
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=support
+      - POSTGRES_USER=support
+      - POSTGRES_PASSWORD
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U support -d support"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - support_database:/var/lib/postgresql/data
+
+volumes:
+  private_reports:
+  support_database:
