@@ -10,16 +10,20 @@ import (
 )
 
 type Memory struct {
-	mu       sync.Mutex
-	reports  []domain.Report
-	sessions []domain.AdminSession
+	mu            sync.Mutex
+	reports       []domain.Report
+	cancellations map[string]time.Time
+	sessions      []domain.AdminSession
 }
 
-func NewMemory() *Memory { return &Memory{} }
+func NewMemory() *Memory { return &Memory{cancellations: make(map[string]time.Time)} }
 
 func (memory *Memory) Create(_ context.Context, report domain.Report) error {
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
+	if _, cancelled := memory.cancellations[string(report.IdempotencyHash)]; cancelled {
+		return ErrCancelled
+	}
 	for _, existing := range memory.reports {
 		if existing.SupportCode == report.SupportCode || bytes.Equal(existing.IdempotencyHash, report.IdempotencyHash) {
 			return ErrConflict
@@ -37,7 +41,27 @@ func (memory *Memory) ByIdempotencyHash(_ context.Context, hash []byte) (domain.
 			return report, nil
 		}
 	}
+	if _, cancelled := memory.cancellations[string(hash)]; cancelled {
+		return domain.Report{}, ErrCancelled
+	}
 	return domain.Report{}, ErrNotFound
+}
+
+func (memory *Memory) CancelByIdempotencyHash(_ context.Context, hash []byte, now time.Time) (*domain.Report, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	memory.cancellations[string(hash)] = now
+	for index, report := range memory.reports {
+		if bytes.Equal(report.IdempotencyHash, hash) {
+			if report.DeletedAt == nil {
+				memory.reports[index].DeletedAt = &now
+				memory.reports[index].UpdatedAt = now
+			}
+			cancelled := memory.reports[index]
+			return &cancelled, nil
+		}
+	}
+	return nil, nil
 }
 
 func (memory *Memory) ByCapabilityHash(_ context.Context, hash []byte) (domain.Report, error) {

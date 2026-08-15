@@ -10,6 +10,7 @@ The public portal is a Vue 3 and TypeScript application. A small Go service owns
 - A versioned multipart API shared by the web portal and native applications.
 - Explicit 4 MiB diagnostic upload bounds and per-product ZIP entry allowlists.
 - Idempotent submission and receipt reconciliation after an uncertain response.
+- Atomic cancellation tombstones that prevent a delayed upload from recreating a cancelled private report.
 - Human-readable support codes and unguessable private status/deletion links.
 - Application-level AES-256-GCM encryption for private report fields, capabilities, and diagnostic objects.
 - Automatic private-data expiration and immediate deletion through the private capability.
@@ -85,6 +86,7 @@ npm run build
 - New reports are private. Nothing is published automatically.
 - Diagnostic attachments are optional and must match the selected product's registered schema.
 - The service does not store raw idempotency keys or raw status capabilities in database lookup columns.
+- Cancellation retains only the one-way idempotency hash needed to reject a delayed submission; it does not retain report content.
 - Private report text, contact details, receipt capabilities, and diagnostic objects are encrypted before storage.
 - Support codes are identifiers, not authentication secrets.
 - Private status URLs are bearer capabilities. Applications must never put them in diagnostics, telemetry, or public issues.

@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -27,5 +28,26 @@ func TestSecurityHeadersKeepPrivateRoutesOutOfIndexes(t *testing.T) {
 	handler.ServeHTTP(public, httptest.NewRequest(http.MethodGet, "/", nil))
 	if got := public.Header().Get("X-Robots-Tag"); got != "" {
 		t.Fatalf("public X-Robots-Tag = %q", got)
+	}
+}
+
+func TestCancellationEndpointReturnsTerminalResult(t *testing.T) {
+	handler, _ := testAdminHandler(t)
+	idempotencyKey := strings.Repeat("A", 43)
+
+	cancelRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/receipts", nil)
+	cancelRequest.Header.Set("Idempotency-Key", idempotencyKey)
+	cancelled := httptest.NewRecorder()
+	handler.ServeHTTP(cancelled, cancelRequest)
+	if cancelled.Code != http.StatusNoContent || cancelled.Body.Len() != 0 {
+		t.Fatalf("cancellation = %d, body = %q", cancelled.Code, cancelled.Body.String())
+	}
+
+	reconcileRequest := httptest.NewRequest(http.MethodGet, "/api/v1/receipts", nil)
+	reconcileRequest.Header.Set("Idempotency-Key", idempotencyKey)
+	reconciled := httptest.NewRecorder()
+	handler.ServeHTTP(reconciled, reconcileRequest)
+	if reconciled.Code != http.StatusGone || !strings.Contains(reconciled.Body.String(), "submission_cancelled") {
+		t.Fatalf("reconciliation = %d, body = %q", reconciled.Code, reconciled.Body.String())
 	}
 }

@@ -9,13 +9,15 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("report not found")
-	ErrConflict = errors.New("report already exists")
+	ErrNotFound  = errors.New("report not found")
+	ErrConflict  = errors.New("report already exists")
+	ErrCancelled = errors.New("report submission was cancelled")
 )
 
 type Reports interface {
 	Create(context.Context, domain.Report) error
 	ByIdempotencyHash(context.Context, []byte) (domain.Report, error)
+	CancelByIdempotencyHash(context.Context, []byte, time.Time) (*domain.Report, error)
 	ByCapabilityHash(context.Context, []byte) (domain.Report, error)
 	DeleteByCapabilityHash(context.Context, []byte) (domain.Report, error)
 	Expired(context.Context, time.Time, int) ([]domain.Report, error)
