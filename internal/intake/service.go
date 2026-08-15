@@ -29,6 +29,7 @@ var (
 	ErrInvalid      = errors.New("invalid report")
 	ErrNotFound     = errors.New("report not found")
 	ErrKeyReused    = errors.New("idempotency key was already used for another report")
+	ErrCancelled    = errors.New("report submission was cancelled")
 	idempotencyKey  = regexp.MustCompile(`^[A-Za-z0-9_-]{32,128}$`)
 	productID       = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
 	archiveFileName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$`)
@@ -73,6 +74,8 @@ func (service *Service) Submit(ctx context.Context, submission Submission) (doma
 			return domain.Receipt{}, ErrKeyReused
 		}
 		return service.receipt(existing)
+	} else if errors.Is(err, store.ErrCancelled) {
+		return domain.Receipt{}, ErrCancelled
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return domain.Receipt{}, err
 	}
@@ -130,6 +133,9 @@ func (service *Service) Submit(ctx context.Context, submission Submission) (doma
 			if report.DiagnosticObjectKey != nil {
 				_ = service.objects.Delete(*report.DiagnosticObjectKey)
 			}
+			if errors.Is(err, store.ErrCancelled) {
+				return domain.Receipt{}, ErrCancelled
+			}
 			if errors.Is(err, store.ErrConflict) {
 				if existing, lookupErr := service.reports.ByIdempotencyHash(ctx, idempotencyHash); lookupErr == nil {
 					if !bytes.Equal(existing.RequestHash, requestHash) {
@@ -151,6 +157,9 @@ func (service *Service) Reconcile(ctx context.Context, key string) (domain.Recei
 		return domain.Receipt{}, ErrInvalid
 	}
 	report, err := service.reports.ByIdempotencyHash(ctx, hash([]byte(key)))
+	if errors.Is(err, store.ErrCancelled) {
+		return domain.Receipt{}, ErrCancelled
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		return domain.Receipt{}, ErrNotFound
 	}
@@ -158,6 +167,22 @@ func (service *Service) Reconcile(ctx context.Context, key string) (domain.Recei
 		return domain.Receipt{}, err
 	}
 	return service.receipt(report)
+}
+
+func (service *Service) Cancel(ctx context.Context, key string) error {
+	if !idempotencyKey.MatchString(key) {
+		return ErrInvalid
+	}
+	report, err := service.reports.CancelByIdempotencyHash(ctx, hash([]byte(key)), service.now())
+	if err != nil {
+		return err
+	}
+	if report != nil && report.DiagnosticObjectKey != nil {
+		if err := service.objects.Delete(*report.DiagnosticObjectKey); err != nil {
+			return fmt.Errorf("delete cancelled private diagnostic object: %w", err)
+		}
+	}
+	return nil
 }
 
 func (service *Service) Status(ctx context.Context, capability string) (domain.PrivateStatus, error) {

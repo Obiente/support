@@ -55,6 +55,52 @@ func TestSubmitRejectsIdempotencyKeyReuseWithDifferentContent(t *testing.T) {
 	}
 }
 
+func TestCancelBeforeSubmitPreventsLatePrivateReport(t *testing.T) {
+	service, reports, objects := testService(t)
+	submission := validSubmission(t)
+	if err := service.Cancel(context.Background(), submission.IdempotencyKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Cancel(context.Background(), submission.IdempotencyKey); err != nil {
+		t.Fatalf("repeated cancel: %v", err)
+	}
+	if _, err := service.Submit(context.Background(), submission); !errors.Is(err, ErrCancelled) {
+		t.Fatalf("late submit error = %v, want ErrCancelled", err)
+	}
+	if _, err := service.Reconcile(context.Background(), submission.IdempotencyKey); !errors.Is(err, ErrCancelled) {
+		t.Fatalf("reconcile error = %v, want ErrCancelled", err)
+	}
+	if _, err := reports.ByIdempotencyHash(context.Background(), hash([]byte(submission.IdempotencyKey))); !errors.Is(err, store.ErrCancelled) {
+		t.Fatalf("stored cancellation error = %v, want ErrCancelled", err)
+	}
+	if len(objects.Values) != 0 {
+		t.Fatalf("private object count = %d, want 0", len(objects.Values))
+	}
+}
+
+func TestCancelExistingReportDeletesPrivateDataAndPreventsRecreation(t *testing.T) {
+	service, reports, objects := testService(t)
+	submission := validSubmission(t)
+	if _, err := service.Submit(context.Background(), submission); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Cancel(context.Background(), submission.IdempotencyKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Cancel(context.Background(), submission.IdempotencyKey); err != nil {
+		t.Fatalf("repeated cancel: %v", err)
+	}
+	if len(objects.Values) != 0 {
+		t.Fatalf("private object count after cancellation = %d, want 0", len(objects.Values))
+	}
+	if _, err := reports.ByIdempotencyHash(context.Background(), hash([]byte(submission.IdempotencyKey))); !errors.Is(err, store.ErrCancelled) {
+		t.Fatalf("stored cancellation error = %v, want ErrCancelled", err)
+	}
+	if _, err := service.Submit(context.Background(), submission); !errors.Is(err, ErrCancelled) {
+		t.Fatalf("recreated submit error = %v, want ErrCancelled", err)
+	}
+}
+
 func TestSubmitRejectsUnregisteredAndExpandingArchiveEntries(t *testing.T) {
 	service, _, _ := testService(t)
 	submission := validSubmission(t)

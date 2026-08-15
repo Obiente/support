@@ -50,6 +50,7 @@ paths:
                 $ref: "#/components/schemas/Receipt"
         "400": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
   /api/v1/receipts:
     get:
       summary: Reconcile an uncertain report submission
@@ -65,6 +66,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Receipt"
         "404": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+    delete:
+      summary: Cancel a private report submission
+      operationId: cancelReportSubmission
+      description: Atomically prevent a pending submission from creating a report and delete any report already created with the same idempotency key.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: The submission is terminally cancelled and no private report remains available.
+        "400": { $ref: "#/components/responses/Problem" }
   /api/v1/reports/{capability}:
     parameters:
       - name: capability

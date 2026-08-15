@@ -51,6 +51,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/products", server.listProducts)
 	mux.HandleFunc("POST /api/v1/reports", server.createReport)
 	mux.HandleFunc("GET /api/v1/receipts", server.reconcileReceipt)
+	mux.HandleFunc("DELETE /api/v1/receipts", server.cancelSubmission)
 	mux.HandleFunc("GET /api/v1/reports/{capability}", server.reportStatus)
 	mux.HandleFunc("DELETE /api/v1/reports/{capability}", server.deleteReport)
 	mux.HandleFunc("POST /api/v1/admin/login", server.adminLogin)
@@ -168,6 +169,14 @@ func (server *Server) reconcileReceipt(response http.ResponseWriter, request *ht
 	writeJSON(response, http.StatusOK, receipt)
 }
 
+func (server *Server) cancelSubmission(response http.ResponseWriter, request *http.Request) {
+	if err := server.intake.Cancel(request.Context(), request.Header.Get("Idempotency-Key")); err != nil {
+		server.writeIntakeError(response, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func (server *Server) reportStatus(response http.ResponseWriter, request *http.Request) {
 	status, err := server.intake.Status(request.Context(), request.PathValue("capability"))
 	if err != nil {
@@ -192,6 +201,8 @@ func (server *Server) writeIntakeError(response http.ResponseWriter, err error) 
 		writeProblem(response, http.StatusBadRequest, "invalid_report", "Check the report details and try again.")
 	case errors.Is(err, intake.ErrKeyReused):
 		writeProblem(response, http.StatusConflict, "idempotency_conflict", "This retry identifier belongs to different report content.")
+	case errors.Is(err, intake.ErrCancelled):
+		writeProblem(response, http.StatusGone, "submission_cancelled", "This private report submission was cancelled.")
 	case errors.Is(err, intake.ErrNotFound):
 		writeProblem(response, http.StatusNotFound, "not_found", "This private report link is not available.")
 	default:

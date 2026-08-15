@@ -28,7 +28,24 @@ func OpenPostgres(ctx context.Context, databaseURL string) (*Postgres, error) {
 }
 
 func (postgres *Postgres) Create(ctx context.Context, report domain.Report) error {
-	_, err := postgres.pool.Exec(ctx, `
+	transaction, err := postgres.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback(ctx)
+	if _, err := transaction.Exec(ctx, `INSERT INTO support_submission_states (idempotency_hash)
+		VALUES ($1) ON CONFLICT (idempotency_hash) DO NOTHING`, report.IdempotencyHash); err != nil {
+		return err
+	}
+	var cancelledAt *time.Time
+	if err := transaction.QueryRow(ctx, `SELECT cancelled_at FROM support_submission_states
+		WHERE idempotency_hash = $1 FOR UPDATE`, report.IdempotencyHash).Scan(&cancelledAt); err != nil {
+		return err
+	}
+	if cancelledAt != nil {
+		return ErrCancelled
+	}
+	_, err = transaction.Exec(ctx, `
 		INSERT INTO support_reports (
 			id, support_code, product_id, request_type, status, private_payload,
 			capability_ciphertext, diagnostic_object_key, idempotency_hash, request_hash,
@@ -43,11 +60,58 @@ func (postgres *Postgres) Create(ctx context.Context, report domain.Report) erro
 	if errors.As(err, &postgresError) && postgresError.Code == "23505" {
 		return ErrConflict
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return transaction.Commit(ctx)
 }
 
 func (postgres *Postgres) ByIdempotencyHash(ctx context.Context, hash []byte) (domain.Report, error) {
-	return scanReport(postgres.pool.QueryRow(ctx, reportSelect+` WHERE idempotency_hash = $1 AND deleted_at IS NULL`, hash))
+	report, err := scanReport(postgres.pool.QueryRow(ctx, reportSelect+` WHERE idempotency_hash = $1 AND deleted_at IS NULL`, hash))
+	if !errors.Is(err, ErrNotFound) {
+		return report, err
+	}
+	var cancelled bool
+	if lookupErr := postgres.pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM support_submission_states WHERE idempotency_hash = $1 AND cancelled_at IS NOT NULL
+	)`, hash).Scan(&cancelled); lookupErr != nil {
+		return domain.Report{}, lookupErr
+	}
+	if cancelled {
+		return domain.Report{}, ErrCancelled
+	}
+	return domain.Report{}, ErrNotFound
+}
+
+func (postgres *Postgres) CancelByIdempotencyHash(ctx context.Context, hash []byte, now time.Time) (*domain.Report, error) {
+	transaction, err := postgres.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer transaction.Rollback(ctx)
+	if _, err := transaction.Exec(ctx, `INSERT INTO support_submission_states (idempotency_hash, cancelled_at)
+		VALUES ($1, $2)
+		ON CONFLICT (idempotency_hash) DO UPDATE
+		SET cancelled_at = COALESCE(support_submission_states.cancelled_at, EXCLUDED.cancelled_at)`, hash, now); err != nil {
+		return nil, err
+	}
+	report, updateErr := scanReport(transaction.QueryRow(ctx, `UPDATE support_reports
+		SET deleted_at = COALESCE(deleted_at, $1),
+			updated_at = CASE WHEN deleted_at IS NULL THEN $1 ELSE updated_at END
+		WHERE idempotency_hash = $2
+		RETURNING id, support_code, product_id, request_type, status, private_payload,
+		capability_ciphertext, diagnostic_object_key, idempotency_hash, request_hash,
+		capability_hash, created_at, updated_at, retention_until, deleted_at`, now, hash))
+	if updateErr != nil && !errors.Is(updateErr, ErrNotFound) {
+		return nil, updateErr
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return nil, err
+	}
+	if errors.Is(updateErr, ErrNotFound) {
+		return nil, nil
+	}
+	return &report, nil
 }
 
 func (postgres *Postgres) ByCapabilityHash(ctx context.Context, hash []byte) (domain.Report, error) {
