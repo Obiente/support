@@ -25,7 +25,14 @@ import (
 )
 
 func TestAdminSessionProtectsReviewAndDiagnosticRoutes(t *testing.T) {
-	handler, reportID := testAdminHandler(t)
+	handler, reportID, capability := testAdminHandler(t)
+
+	reporterReply := httptest.NewRecorder()
+	handler.ServeHTTP(reporterReply, httptest.NewRequest(http.MethodPost, "/api/v1/reports/"+capability+"/messages",
+		strings.NewReader(`{"body":"The failure happened after I pressed Update."}`)))
+	if reporterReply.Code != http.StatusCreated || !strings.Contains(reporterReply.Body.String(), `"author":"reporter"`) {
+		t.Fatalf("reporter reply = %d, body = %s", reporterReply.Code, reporterReply.Body.String())
+	}
 
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/admin/reports", nil))
@@ -75,6 +82,17 @@ func TestAdminSessionProtectsReviewAndDiagnosticRoutes(t *testing.T) {
 		t.Fatalf("status update = %d, body = %s", updated.Code, updated.Body.String())
 	}
 
+	messageRequest := httptest.NewRequest(http.MethodPost, "/api/v1/admin/reports/"+reportID+"/messages",
+		strings.NewReader(`{"body":"Which package format did you install?"}`))
+	messageRequest.AddCookie(cookies[0])
+	messageRequest.Header.Set("X-CSRF-Token", session.CSRFToken)
+	messaged := httptest.NewRecorder()
+	handler.ServeHTTP(messaged, messageRequest)
+	if messaged.Code != http.StatusCreated || !strings.Contains(messaged.Body.String(), `"status":"needs_information"`) ||
+		!strings.Contains(messaged.Body.String(), `"author":"maintainer"`) {
+		t.Fatalf("maintainer message = %d, body = %s", messaged.Code, messaged.Body.String())
+	}
+
 	download := httptest.NewRequest(http.MethodGet, "/api/v1/admin/reports/"+reportID+"/diagnostics", nil)
 	download.AddCookie(cookies[0])
 	diagnostics := httptest.NewRecorder()
@@ -84,7 +102,7 @@ func TestAdminSessionProtectsReviewAndDiagnosticRoutes(t *testing.T) {
 	}
 }
 
-func testAdminHandler(t *testing.T) (http.Handler, string) {
+func testAdminHandler(t *testing.T) (http.Handler, string, string) {
 	t.Helper()
 	box, err := cryptobox.NewFromBase64(base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	if err != nil {
@@ -129,7 +147,8 @@ func testAdminHandler(t *testing.T) (http.Handler, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return server.Handler(), listed[0].ID
+	capability := receipt.StatusURL[strings.LastIndex(receipt.StatusURL, "/")+1:]
+	return server.Handler(), listed[0].ID, capability
 }
 
 func testDiagnosticArchive(t *testing.T) []byte {

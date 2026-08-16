@@ -32,7 +32,7 @@ func TestSecurityHeadersKeepPrivateRoutesOutOfIndexes(t *testing.T) {
 }
 
 func TestCancellationEndpointReturnsTerminalResult(t *testing.T) {
-	handler, _ := testAdminHandler(t)
+	handler, _, _ := testAdminHandler(t)
 	idempotencyKey := strings.Repeat("A", 43)
 
 	cancelRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/receipts", nil)

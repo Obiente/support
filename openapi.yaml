@@ -105,6 +105,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/PrivateStatus"
         "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/reports/{capability}/messages:
+    post:
+      summary: Reply to a private support conversation
+      operationId: createPrivateReportMessage
+      parameters:
+        - name: capability
+          in: path
+          required: true
+          schema: { type: string, minLength: 43, maxLength: 43 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageInput" }
+      responses:
+        "201":
+          description: Message added to the private report.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PrivateStatus" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /api/v1/admin/login:
     post:
       summary: Sign in a support maintainer
@@ -233,6 +255,32 @@ paths:
               schema: { type: string, format: binary }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/admin/reports/{id}/messages:
+    post:
+      summary: Ask a reporter for more information
+      operationId: createAdminReportMessage
+      security: [{ AdminSessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/CSRFToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageInput" }
+      responses:
+        "201":
+          description: Encrypted maintainer message added and report marked as needing information.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminReportDetail" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     AdminSessionCookie:
@@ -313,7 +361,7 @@ components:
         retentionUntil: { type: string, format: date-time }
     PrivateStatus:
       type: object
-      required: [contractVersion, supportCode, productId, requestType, status, createdAt, updatedAt, retentionUntil]
+      required: [contractVersion, supportCode, productId, requestType, status, createdAt, updatedAt, retentionUntil, messages]
       properties:
         contractVersion: { const: 1 }
         supportCode: { type: string }
@@ -323,6 +371,22 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         retentionUntil: { type: string, format: date-time }
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/SupportMessage" }
+    MessageInput:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 8192 }
+    SupportMessage:
+      type: object
+      required: [id, author, body, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        author: { enum: [maintainer, reporter] }
+        body: { type: string }
+        createdAt: { type: string, format: date-time }
     ReportStatus:
       type: string
       enum: [new, needs_information, accepted, duplicate, resolved, rejected]
@@ -353,7 +417,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/AdminReportSummary"
         - type: object
-          required: [description, release]
+          required: [description, release, messages]
           properties:
             description: { type: string }
             contact: { type: string }
@@ -366,6 +430,9 @@ components:
                 platform: { type: string }
                 osVersion: { type: string }
                 architecture: { type: string }
+            messages:
+              type: array
+              items: { $ref: "#/components/schemas/SupportMessage" }
     AdminReportResponse:
       type: object
       required: [contractVersion, reports, total, limit, offset]

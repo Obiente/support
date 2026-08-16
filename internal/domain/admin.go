@@ -37,4 +37,5 @@ type AdminReportDetail struct {
 	Description string          `json:"description"`
 	Contact     string          `json:"contact,omitempty"`
 	Release     ReleaseMetadata `json:"release"`
+	Messages    []Message       `json:"messages"`
 }

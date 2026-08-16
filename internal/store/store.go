@@ -25,6 +25,8 @@ type Reports interface {
 	AdminList(context.Context, *domain.ReportStatus, int, int) ([]domain.Report, int, error)
 	AdminByID(context.Context, string) (domain.Report, error)
 	AdminUpdateStatus(context.Context, string, domain.ReportStatus, time.Time) (domain.Report, error)
+	AddMessage(context.Context, domain.Message, *domain.ReportStatus, time.Time) (domain.Report, error)
+	Messages(context.Context, string) ([]domain.Message, error)
 	Close()
 }
 

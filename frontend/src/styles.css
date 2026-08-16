@@ -296,6 +296,13 @@ footer a { color: var(--text); }
 .private-copy p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .diagnostic-download { margin-top: 22px; }
 .private-warning { padding: 16px; border-left: 2px solid var(--accent); color: var(--muted); background: var(--surface); font-size: 11px; }
+.support-message { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; margin-top: 14px; padding: 14px; border: 1px solid var(--line); background: var(--surface); }
+.support-message b, .support-message small { font-size: 11px; }
+.support-message small { color: var(--muted); }
+.support-message p { grid-column: 1 / -1; }
+.message-composer { display: grid; gap: 12px; margin-top: 18px; }
+.message-composer .field { padding: 0; border: 0; }
+.message-composer button { justify-self: start; }
 
 @media (max-width: 760px) {
   .site-header,

@@ -196,7 +196,33 @@ func (service *Service) Status(ctx context.Context, capability string) (domain.P
 	if err != nil {
 		return domain.PrivateStatus{}, err
 	}
-	return privateStatus(report), nil
+	messages, err := service.openMessages(ctx, report.ID)
+	if err != nil {
+		return domain.PrivateStatus{}, err
+	}
+	return privateStatus(report, messages), nil
+}
+
+func (service *Service) ReporterMessage(ctx context.Context, capability, body string) (domain.PrivateStatus, error) {
+	if !validCapability(capability) {
+		return domain.PrivateStatus{}, ErrNotFound
+	}
+	report, err := service.reports.ByCapabilityHash(ctx, hash([]byte(capability)))
+	if errors.Is(err, store.ErrNotFound) {
+		return domain.PrivateStatus{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.PrivateStatus{}, err
+	}
+	report, err = service.addMessage(ctx, report, domain.MessageAuthorReporter, body, nil)
+	if err != nil {
+		return domain.PrivateStatus{}, err
+	}
+	messages, err := service.openMessages(ctx, report.ID)
+	if err != nil {
+		return domain.PrivateStatus{}, err
+	}
+	return privateStatus(report, messages), nil
 }
 
 func (service *Service) Delete(ctx context.Context, capability string) (domain.PrivateStatus, error) {
@@ -215,7 +241,7 @@ func (service *Service) Delete(ctx context.Context, capability string) (domain.P
 			return domain.PrivateStatus{}, fmt.Errorf("delete private diagnostic object: %w", err)
 		}
 	}
-	status := privateStatus(report)
+	status := privateStatus(report, []domain.Message{})
 	status.Status = "deleted"
 	return status, nil
 }
@@ -275,12 +301,11 @@ func (service *Service) AdminDetail(ctx context.Context, id string) (domain.Admi
 	if err != nil {
 		return domain.AdminReportDetail{}, err
 	}
-	return domain.AdminReportDetail{
-		AdminReportSummary: adminSummary(report, payload),
-		Description:        payload.Description,
-		Contact:            payload.Contact,
-		Release:            payload.Release,
-	}, nil
+	messages, err := service.openMessages(ctx, report.ID)
+	if err != nil {
+		return domain.AdminReportDetail{}, err
+	}
+	return adminDetail(report, payload, messages), nil
 }
 
 func (service *Service) AdminDiagnostics(ctx context.Context, id string) ([]byte, string, error) {
@@ -313,12 +338,74 @@ func (service *Service) AdminUpdateStatus(ctx context.Context, id string, status
 	if err != nil {
 		return domain.AdminReportDetail{}, err
 	}
-	return domain.AdminReportDetail{
-		AdminReportSummary: adminSummary(report, payload),
-		Description:        payload.Description,
-		Contact:            payload.Contact,
-		Release:            payload.Release,
-	}, nil
+	messages, err := service.openMessages(ctx, report.ID)
+	if err != nil {
+		return domain.AdminReportDetail{}, err
+	}
+	return adminDetail(report, payload, messages), nil
+}
+
+func (service *Service) AdminMessage(ctx context.Context, id, body string) (domain.AdminReportDetail, error) {
+	report, err := service.reports.AdminByID(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return domain.AdminReportDetail{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.AdminReportDetail{}, err
+	}
+	status := domain.StatusNeedsInformation
+	report, err = service.addMessage(ctx, report, domain.MessageAuthorMaintainer, body, &status)
+	if err != nil {
+		return domain.AdminReportDetail{}, err
+	}
+	payload, err := service.openPrivatePayload(report)
+	if err != nil {
+		return domain.AdminReportDetail{}, err
+	}
+	messages, err := service.openMessages(ctx, report.ID)
+	if err != nil {
+		return domain.AdminReportDetail{}, err
+	}
+	return adminDetail(report, payload, messages), nil
+}
+
+func (service *Service) addMessage(ctx context.Context, report domain.Report, author domain.MessageAuthor, body string, status *domain.ReportStatus) (domain.Report, error) {
+	body = strings.TrimSpace(body)
+	if !validText(body, 1, domain.MaxMessageBytes, true) {
+		return domain.Report{}, ErrInvalid
+	}
+	id, err := randomUUID()
+	if err != nil {
+		return domain.Report{}, err
+	}
+	sealed, err := service.box.Seal([]byte(body), []byte(report.ID+":message:"+id))
+	if err != nil {
+		return domain.Report{}, err
+	}
+	now := service.now()
+	updated, err := service.reports.AddMessage(ctx, domain.Message{
+		ID: id, ReportID: report.ID, Author: author, BodyCiphertext: sealed, CreatedAt: now,
+	}, status, now)
+	if errors.Is(err, store.ErrNotFound) {
+		return domain.Report{}, ErrNotFound
+	}
+	return updated, err
+}
+
+func (service *Service) openMessages(ctx context.Context, reportID string) ([]domain.Message, error) {
+	messages, err := service.reports.Messages(ctx, reportID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range messages {
+		plaintext, err := service.box.Open(messages[index].BodyCiphertext, []byte(reportID+":message:"+messages[index].ID))
+		if err != nil {
+			return nil, err
+		}
+		messages[index].Body = string(plaintext)
+		messages[index].BodyCiphertext = nil
+	}
+	return messages, nil
 }
 
 func (service *Service) openPrivatePayload(report domain.Report) (domain.PrivatePayload, error) {
@@ -339,6 +426,13 @@ func adminSummary(report domain.Report, payload domain.PrivatePayload) domain.Ad
 		RequestType: report.RequestType, Status: report.Status, Source: payload.Source,
 		Title: payload.Title, HasDiagnostics: report.DiagnosticObjectKey != nil,
 		CreatedAt: report.CreatedAt, UpdatedAt: report.UpdatedAt, RetentionUntil: report.RetentionUntil,
+	}
+}
+
+func adminDetail(report domain.Report, payload domain.PrivatePayload, messages []domain.Message) domain.AdminReportDetail {
+	return domain.AdminReportDetail{
+		AdminReportSummary: adminSummary(report, payload), Description: payload.Description,
+		Contact: payload.Contact, Release: payload.Release, Messages: messages,
 	}
 }
 
@@ -458,12 +552,12 @@ func contains(values []string, wanted string) bool {
 	return false
 }
 
-func privateStatus(report domain.Report) domain.PrivateStatus {
+func privateStatus(report domain.Report, messages []domain.Message) domain.PrivateStatus {
 	return domain.PrivateStatus{
 		ContractVersion: domain.ContractVersion, SupportCode: report.SupportCode,
 		ProductID: report.ProductID, RequestType: string(report.RequestType),
 		Status: string(report.Status), CreatedAt: report.CreatedAt, UpdatedAt: report.UpdatedAt,
-		RetentionUntil: report.RetentionUntil,
+		RetentionUntil: report.RetentionUntil, Messages: messages,
 	}
 }
 

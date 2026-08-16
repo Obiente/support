@@ -208,6 +208,33 @@ func (server *Server) adminUpdateReport(response http.ResponseWriter, request *h
 	writeJSON(response, http.StatusOK, report)
 }
 
+func (server *Server) adminReportMessage(response http.ResponseWriter, request *http.Request) {
+	_, session, ok := server.requireAdminCSRF(response, request)
+	if !ok {
+		return
+	}
+	var body struct {
+		Body string `json:"body"`
+	}
+	if err := decodeAdminJSON(response, request, &body); err != nil {
+		writeProblem(response, http.StatusBadRequest, "invalid_message", "Enter a message to send to the reporter.")
+		return
+	}
+	id, ok := adminReportID(response, request)
+	if !ok {
+		return
+	}
+	if !server.auditAdmin(response, request, session.Username, "report_message_requested", &id) {
+		return
+	}
+	report, err := server.intake.AdminMessage(request.Context(), id, body.Body)
+	if err != nil {
+		server.writeAdminError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, report)
+}
+
 func (server *Server) adminDiagnostics(response http.ResponseWriter, request *http.Request) {
 	_, session, ok := server.requireAdmin(response, request)
 	if !ok {

@@ -53,6 +53,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/receipts", server.reconcileReceipt)
 	mux.HandleFunc("DELETE /api/v1/receipts", server.cancelSubmission)
 	mux.HandleFunc("GET /api/v1/reports/{capability}", server.reportStatus)
+	mux.HandleFunc("POST /api/v1/reports/{capability}/messages", server.reportMessage)
 	mux.HandleFunc("DELETE /api/v1/reports/{capability}", server.deleteReport)
 	mux.HandleFunc("POST /api/v1/admin/login", server.adminLogin)
 	mux.HandleFunc("GET /api/v1/admin/session", server.adminSession)
@@ -60,6 +61,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/reports", server.adminReports)
 	mux.HandleFunc("GET /api/v1/admin/reports/{id}", server.adminReport)
 	mux.HandleFunc("PATCH /api/v1/admin/reports/{id}", server.adminUpdateReport)
+	mux.HandleFunc("POST /api/v1/admin/reports/{id}/messages", server.adminReportMessage)
 	mux.HandleFunc("GET /api/v1/admin/reports/{id}/diagnostics", server.adminDiagnostics)
 	mux.Handle("GET /", server.spa())
 	return securityHeaders(mux)
@@ -184,6 +186,30 @@ func (server *Server) reportStatus(response http.ResponseWriter, request *http.R
 		return
 	}
 	writeJSON(response, http.StatusOK, status)
+}
+
+func (server *Server) reportMessage(response http.ResponseWriter, request *http.Request) {
+	var body struct {
+		Body string `json:"body"`
+	}
+	request.Body = http.MaxBytesReader(response, request.Body, domain.MaxMessageBytes+1024)
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		writeProblem(response, http.StatusBadRequest, "invalid_message", "Enter a message to send to support.")
+		return
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		writeProblem(response, http.StatusBadRequest, "invalid_message", "Enter one message to send to support.")
+		return
+	}
+	status, err := server.intake.ReporterMessage(request.Context(), request.PathValue("capability"), body.Body)
+	if err != nil {
+		server.writeIntakeError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, status)
 }
 
 func (server *Server) deleteReport(response http.ResponseWriter, request *http.Request) {

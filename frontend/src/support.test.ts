@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { adminLogin, deleteReceipt, loadProducts, randomIdempotencyKey, reconcileReceipt, updateAdminReportStatus } from './support'
+import { adminLogin, deleteReceipt, loadProducts, randomIdempotencyKey, reconcileReceipt, sendAdminMessage, sendPrivateMessage, updateAdminReportStatus } from './support'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -99,5 +99,24 @@ describe('support contract client', () => {
       method: 'PATCH',
       headers: expect.objectContaining({ 'X-CSRF-Token': 'A'.repeat(43) }),
     }))
+  })
+
+  it('posts private conversation messages through the scoped endpoints', async () => {
+    const response = {
+      contractVersion: 1, supportCode: 'OBI-ABCDE-23456', productId: 'synthetic-product', requestType: 'bug',
+      status: 'needs_information', createdAt: '2026-08-13T12:00:00Z', updatedAt: '2026-08-13T13:00:00Z',
+      retentionUntil: '2026-09-12T12:00:00Z', messages: [],
+    }
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(response), {
+      status: 201, headers: { 'Content-Type': 'application/json' },
+    })))
+    vi.stubGlobal('fetch', fetch)
+    const capability = 'abcdefghijklmnopqrstuvwxyzABCDEFGH_12345678'
+
+    await sendPrivateMessage(capability, 'Reporter reply')
+    await sendAdminMessage('11111111-1111-4111-8111-111111111111', 'Maintainer question')
+
+    expect(fetch).toHaveBeenNthCalledWith(1, `/api/v1/reports/${capability}/messages`, expect.objectContaining({ method: 'POST' }))
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/admin/reports/11111111-1111-4111-8111-111111111111/messages', expect.objectContaining({ method: 'POST' }))
   })
 })
