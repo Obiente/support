@@ -14,6 +14,7 @@ type Memory struct {
 	reports       []domain.Report
 	cancellations map[string]time.Time
 	sessions      []domain.AdminSession
+	messages      []domain.Message
 }
 
 func NewMemory() *Memory { return &Memory{cancellations: make(map[string]time.Time)} }
@@ -110,6 +111,13 @@ func (memory *Memory) Purge(_ context.Context, id string, before time.Time) erro
 	for index, report := range memory.reports {
 		if report.ID == id && (report.DeletedAt != nil || !report.RetentionUntil.After(before)) {
 			memory.reports = append(memory.reports[:index], memory.reports[index+1:]...)
+			keptMessages := memory.messages[:0]
+			for _, message := range memory.messages {
+				if message.ReportID != id {
+					keptMessages = append(keptMessages, message)
+				}
+			}
+			memory.messages = keptMessages
 			return nil
 		}
 	}
@@ -156,6 +164,34 @@ func (memory *Memory) AdminUpdateStatus(_ context.Context, id string, status dom
 		}
 	}
 	return domain.Report{}, ErrNotFound
+}
+
+func (memory *Memory) AddMessage(_ context.Context, message domain.Message, status *domain.ReportStatus, now time.Time) (domain.Report, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	for index := range memory.reports {
+		if memory.reports[index].ID == message.ReportID && memory.reports[index].DeletedAt == nil {
+			memory.messages = append(memory.messages, message)
+			if status != nil {
+				memory.reports[index].Status = *status
+			}
+			memory.reports[index].UpdatedAt = now
+			return memory.reports[index], nil
+		}
+	}
+	return domain.Report{}, ErrNotFound
+}
+
+func (memory *Memory) Messages(_ context.Context, reportID string) ([]domain.Message, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	result := make([]domain.Message, 0)
+	for _, message := range memory.messages {
+		if message.ReportID == reportID {
+			result = append(result, message)
+		}
+	}
+	return result, nil
 }
 
 func (memory *Memory) CreateAdminSession(_ context.Context, session domain.AdminSession) error {

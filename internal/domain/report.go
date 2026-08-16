@@ -6,6 +6,7 @@ const (
 	ContractVersion           = 1
 	MaxMetadataBytes          = 32 * 1024
 	MaxDiagnosticArchiveBytes = 4 * 1024 * 1024
+	MaxMessageBytes           = 8 * 1024
 )
 
 func (value ReportStatus) Valid() bool {
@@ -101,4 +102,21 @@ type PrivateStatus struct {
 	CreatedAt       time.Time `json:"createdAt"`
 	UpdatedAt       time.Time `json:"updatedAt"`
 	RetentionUntil  time.Time `json:"retentionUntil"`
+	Messages        []Message `json:"messages"`
+}
+
+type MessageAuthor string
+
+const (
+	MessageAuthorMaintainer MessageAuthor = "maintainer"
+	MessageAuthorReporter   MessageAuthor = "reporter"
+)
+
+type Message struct {
+	ID             string        `json:"id"`
+	Author         MessageAuthor `json:"author"`
+	Body           string        `json:"body"`
+	CreatedAt      time.Time     `json:"createdAt"`
+	BodyCiphertext []byte        `json:"-"`
+	ReportID       string        `json:"-"`
 }

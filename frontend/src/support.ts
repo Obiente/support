@@ -54,6 +54,14 @@ export interface PrivateStatus {
   createdAt: string
   updatedAt: string
   retentionUntil: string
+  messages: SupportMessage[]
+}
+
+export interface SupportMessage {
+  id: string
+  author: 'maintainer' | 'reporter'
+  body: string
+  createdAt: string
 }
 
 export interface AdminSession {
@@ -81,6 +89,7 @@ export interface AdminReportDetail extends AdminReportSummary {
   description: string
   contact?: string
   release: ReportMetadata['release']
+  messages: SupportMessage[]
 }
 
 export interface AdminReportResponse {
@@ -177,6 +186,15 @@ export async function deletePrivateReport(capability: string): Promise<void> {
   if (!response.ok) throw await apiError(response)
 }
 
+export async function sendPrivateMessage(capability: string, body: string): Promise<PrivateStatus> {
+  const response = await fetch(`/api/v1/reports/${encodeURIComponent(capability)}/messages`, {
+    method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body }),
+  })
+  if (!response.ok) throw await apiError(response)
+  return (await response.json()) as PrivateStatus
+}
+
 export async function deleteReceipt(receipt: Receipt): Promise<void> {
   const deletionUrl = new URL(receipt.deletionUrl, window.location.origin)
   const match = /^\/r\/([A-Za-z0-9_-]{43})$/.exec(deletionUrl.pathname)
@@ -223,6 +241,14 @@ export async function updateAdminReportStatus(id: string, status: string): Promi
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': adminCSRFToken },
     body: JSON.stringify({ status }),
+  })
+}
+
+export async function sendAdminMessage(id: string, body: string): Promise<AdminReportDetail> {
+  return adminJSON<AdminReportDetail>(`/api/v1/admin/reports/${encodeURIComponent(id)}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': adminCSRFToken },
+    body: JSON.stringify({ body }),
   })
 }
 

@@ -8,6 +8,7 @@ import {
   loadAdminReport,
   loadAdminReports,
   loadAdminSession,
+  sendAdminMessage,
   SupportApiError,
   updateAdminReportStatus,
 } from '../support'
@@ -21,6 +22,7 @@ const loading = ref(true)
 const loadingDetail = ref(false)
 const saving = ref(false)
 const message = ref('')
+const reply = ref('')
 
 const statuses = ['new', 'needs_information', 'accepted', 'duplicate', 'resolved', 'rejected']
 
@@ -61,6 +63,22 @@ async function changeStatus(event: Event) {
     selected.value = await updateAdminReportStatus(selected.value.id, (event.target as HTMLSelectElement).value)
     await refreshReports()
     message.value = 'Report status updated.'
+  } catch (error) {
+    await handleError(error)
+  } finally {
+    saving.value = false
+  }
+}
+
+async function askReporter() {
+  if (!selected.value || !reply.value.trim()) return
+  saving.value = true
+  message.value = ''
+  try {
+    selected.value = await sendAdminMessage(selected.value.id, reply.value)
+    reply.value = ''
+    await refreshReports()
+    message.value = 'Message sent. The report now needs information.'
   } catch (error) {
     await handleError(error)
   } finally {
@@ -137,6 +155,18 @@ function readable(value: string): string {
             </dl>
             <div class="private-copy"><h3>Description</h3><p>{{ selected.description }}</p></div>
             <div v-if="selected.contact" class="private-copy"><h3>Private contact</h3><p>{{ selected.contact }}</p></div>
+            <div class="private-copy"><h3>Private conversation</h3>
+              <p v-if="selected.messages.length === 0">No messages yet.</p>
+              <article v-for="entry in selected.messages" :key="entry.id" class="support-message">
+                <b>{{ entry.author === 'maintainer' ? 'Maintainer' : 'Reporter' }}</b>
+                <small>{{ formatDate(entry.createdAt, true) }}</small>
+                <p>{{ entry.body }}</p>
+              </article>
+              <form class="message-composer" @submit.prevent="askReporter">
+                <label class="field"><span>Ask for more details</span><textarea v-model="reply" maxlength="8192" rows="4" required /></label>
+                <button class="primary" type="submit" :disabled="saving || !reply.trim()">{{ saving ? 'Sending...' : 'Send private message' }}</button>
+              </form>
+            </div>
             <a v-if="selected.hasDiagnostics" class="secondary diagnostic-download" :href="adminDiagnosticsURL(selected.id)">Download diagnostic ZIP</a>
             <p class="private-warning">Private report data must not be copied into a public issue without reviewing and removing personal information.</p>
           </template>

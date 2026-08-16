@@ -199,6 +199,54 @@ func (postgres *Postgres) AdminUpdateStatus(ctx context.Context, id string, stat
 		capability_hash, created_at, updated_at, retention_until, deleted_at`, status, now, id))
 }
 
+func (postgres *Postgres) AddMessage(ctx context.Context, message domain.Message, status *domain.ReportStatus, now time.Time) (domain.Report, error) {
+	transaction, err := postgres.pool.Begin(ctx)
+	if err != nil {
+		return domain.Report{}, err
+	}
+	defer transaction.Rollback(ctx)
+	var statusValue any
+	if status != nil {
+		statusValue = string(*status)
+	}
+	report, err := scanReport(transaction.QueryRow(ctx, `UPDATE support_reports
+		SET updated_at = $1, status = COALESCE($2::text, status)
+		WHERE id = $3 AND deleted_at IS NULL
+		RETURNING id, support_code, product_id, request_type, status, private_payload,
+		capability_ciphertext, diagnostic_object_key, idempotency_hash, request_hash,
+		capability_hash, created_at, updated_at, retention_until, deleted_at`, now, statusValue, message.ReportID))
+	if err != nil {
+		return domain.Report{}, err
+	}
+	if _, err := transaction.Exec(ctx, `INSERT INTO support_report_messages
+		(id, report_id, author, body_ciphertext, created_at) VALUES ($1,$2,$3,$4,$5)`,
+		message.ID, message.ReportID, message.Author, message.BodyCiphertext, message.CreatedAt); err != nil {
+		return domain.Report{}, err
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return domain.Report{}, err
+	}
+	return report, nil
+}
+
+func (postgres *Postgres) Messages(ctx context.Context, reportID string) ([]domain.Message, error) {
+	rows, err := postgres.pool.Query(ctx, `SELECT id, report_id, author, body_ciphertext, created_at
+		FROM support_report_messages WHERE report_id = $1 ORDER BY created_at ASC, id ASC`, reportID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.Message, 0)
+	for rows.Next() {
+		var message domain.Message
+		if err := rows.Scan(&message.ID, &message.ReportID, &message.Author, &message.BodyCiphertext, &message.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, message)
+	}
+	return result, rows.Err()
+}
+
 func (postgres *Postgres) CreateAdminSession(ctx context.Context, session domain.AdminSession) error {
 	_, err := postgres.pool.Exec(ctx, `INSERT INTO support_admin_sessions
 		(token_hash, csrf_hash, username, created_at, expires_at) VALUES ($1,$2,$3,$4,$5)`,

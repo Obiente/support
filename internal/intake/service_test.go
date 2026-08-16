@@ -138,6 +138,40 @@ func TestDeleteRevokesCapabilityAndRemovesDiagnosticObject(t *testing.T) {
 	}
 }
 
+func TestPrivateConversationEncryptsMessagesAndUpdatesStatus(t *testing.T) {
+	service, reports, _ := testService(t)
+	receipt, err := service.Submit(context.Background(), validSubmission(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, _, err := service.AdminList(context.Background(), nil, 10, 0)
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("listed reports = %#v, %v", listed, err)
+	}
+	detail, err := service.AdminMessage(context.Background(), listed[0].ID, "Could you describe the last action before the failure?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Status != domain.StatusNeedsInformation || len(detail.Messages) != 1 || detail.Messages[0].Author != domain.MessageAuthorMaintainer {
+		t.Fatalf("maintainer message detail = %#v", detail)
+	}
+	capability := receipt.StatusURL[strings.LastIndex(receipt.StatusURL, "/")+1:]
+	status, err := service.ReporterMessage(context.Background(), capability, "It failed after I pressed Update.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Messages) != 2 || status.Messages[1].Author != domain.MessageAuthorReporter || status.Messages[1].Body != "It failed after I pressed Update." {
+		t.Fatalf("private conversation = %#v", status.Messages)
+	}
+	stored, err := reports.Messages(context.Background(), listed[0].ID)
+	if err != nil || len(stored) != 2 || bytes.Contains(stored[0].BodyCiphertext, []byte("last action")) {
+		t.Fatalf("stored encrypted messages = %#v, %v", stored, err)
+	}
+	if _, err := service.ReporterMessage(context.Background(), capability, "  "); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("blank message error = %v, want ErrInvalid", err)
+	}
+}
+
 func TestPurgeExpiredRemovesEncryptedObjectAndRow(t *testing.T) {
 	service, reports, objects := testService(t)
 	submission := validSubmission(t)

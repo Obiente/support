@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import type { PrivateStatus } from '../support'
-import { deletePrivateReport, loadPrivateStatus } from '../support'
+import { deletePrivateReport, loadPrivateStatus, sendPrivateMessage } from '../support'
 
 const route = useRoute()
 const capability = computed(() => String(route.params.capability ?? ''))
@@ -11,6 +11,8 @@ const loading = ref(true)
 const deleting = ref(false)
 const deleted = ref(false)
 const message = ref('')
+const reply = ref('')
+const sending = ref(false)
 const controller = new AbortController()
 
 onMounted(async () => {
@@ -45,6 +47,21 @@ async function removeReport() {
     deleting.value = false
   }
 }
+
+async function sendReply() {
+  if (!reply.value.trim()) return
+  sending.value = true
+  message.value = ''
+  try {
+    report.value = await sendPrivateMessage(capability.value, reply.value)
+    reply.value = ''
+    message.value = 'Your reply was sent privately.'
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : 'Your reply could not be sent.'
+  } finally {
+    sending.value = false
+  }
+}
 </script>
 
 <template>
@@ -61,6 +78,18 @@ async function removeReport() {
           <div><dt>Submitted</dt><dd>{{ formatDate(report.createdAt, true) }}</dd></div>
           <div><dt>Private data expires</dt><dd>{{ formatDate(report.retentionUntil) }}</dd></div>
         </dl>
+        <div v-if="!deleted" class="private-copy"><h2>Conversation</h2>
+          <p v-if="report.messages.length === 0">Support has not sent any messages yet.</p>
+          <article v-for="entry in report.messages" :key="entry.id" class="support-message">
+            <b>{{ entry.author === 'maintainer' ? 'Support' : 'You' }}</b>
+            <small>{{ formatDate(entry.createdAt, true) }}</small>
+            <p>{{ entry.body }}</p>
+          </article>
+          <form class="message-composer" @submit.prevent="sendReply">
+            <label class="field"><span>Reply privately</span><textarea v-model="reply" maxlength="8192" rows="4" required /></label>
+            <button class="primary" type="submit" :disabled="sending || !reply.trim()">{{ sending ? 'Sending...' : 'Send reply' }}</button>
+          </form>
+        </div>
         <p v-if="!deleted">This link is private. Anyone who has it can view or delete this request. Do not post it publicly.</p>
         <button v-if="!deleted" class="danger" type="button" :disabled="deleting" @click="removeReport">{{ deleting ? 'Deleting...' : 'Delete private request' }}</button>
       </template>
