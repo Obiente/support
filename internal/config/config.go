@@ -25,24 +25,45 @@ type Config struct {
 }
 
 func FromEnvironment() (Config, error) {
+	environment := valueOrDefault("SUPPORT_ENVIRONMENT", "development")
+	publicURL := strings.TrimSpace(os.Getenv("SUPPORT_PUBLIC_URL"))
+	if publicURL == "" {
+		if environment == "production" {
+			return Config{}, errors.New("production SUPPORT_PUBLIC_URL is required")
+		}
+		publicURL = "http://localhost:8080"
+	}
 	config := Config{
 		Address:           valueOrDefault("SUPPORT_ADDRESS", ":8080"),
-		PublicURL:         strings.TrimSuffix(valueOrDefault("SUPPORT_PUBLIC_URL", "http://localhost:8080"), "/"),
+		PublicURL:         publicURL,
 		DatabaseURL:       strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		DataKey:           strings.TrimSpace(os.Getenv("SUPPORT_DATA_KEY")),
 		ObjectRoot:        valueOrDefault("SUPPORT_OBJECT_ROOT", "./data/private"),
 		WebRoot:           valueOrDefault("SUPPORT_WEB_ROOT", "./frontend/dist"),
-		Environment:       valueOrDefault("SUPPORT_ENVIRONMENT", "development"),
+		Environment:       environment,
 		AdminUsername:     strings.TrimSpace(os.Getenv("SUPPORT_ADMIN_USERNAME")),
 		AdminPasswordHash: strings.TrimSpace(os.Getenv("SUPPORT_ADMIN_PASSWORD_HASH")),
 	}
 	parsed, err := url.Parse(config.PublicURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	if err != nil || parsed.Opaque != "" || parsed.Host == "" || parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return Config{}, errors.New("SUPPORT_PUBLIC_URL must be an absolute HTTP or HTTPS URL")
+	}
+	if parsed.User != nil {
+		return Config{}, errors.New("SUPPORT_PUBLIC_URL must not contain user information")
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return Config{}, errors.New("SUPPORT_PUBLIC_URL must not contain a non-root path")
+	}
+	if parsed.RawQuery != "" || parsed.ForceQuery {
+		return Config{}, errors.New("SUPPORT_PUBLIC_URL must not contain a query")
+	}
+	if parsed.Fragment != "" {
+		return Config{}, errors.New("SUPPORT_PUBLIC_URL must not contain a fragment")
 	}
 	if config.Environment == "production" && parsed.Scheme != "https" {
 		return Config{}, errors.New("production SUPPORT_PUBLIC_URL must use HTTPS")
 	}
+	config.PublicURL = strings.TrimSuffix(config.PublicURL, "/")
 	config.SecureCookies = parsed.Scheme == "https"
 	if config.DatabaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")

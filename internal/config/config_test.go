@@ -28,9 +28,26 @@ func TestProductionRequiresHTTPSAndBcryptAdminCredentials(t *testing.T) {
 		t.Fatal("production HTTPS did not enable secure admin cookies")
 	}
 
-	t.Setenv("SUPPORT_PUBLIC_URL", "http://support.example")
-	if _, err := FromEnvironment(); err == nil || !strings.Contains(err.Error(), "HTTPS") {
-		t.Fatalf("HTTP production error = %v", err)
+	invalidPublicURLs := []struct {
+		name      string
+		publicURL string
+		message   string
+	}{
+		{name: "omitted", message: "required"},
+		{name: "HTTP", publicURL: "http://support.example", message: "HTTPS"},
+		{name: "user information", publicURL: "https://operator@support.example", message: "user information"},
+		{name: "non-root path", publicURL: "https://support.example/private", message: "non-root path"},
+		{name: "query", publicURL: "https://support.example?source=app", message: "query"},
+		{name: "empty query", publicURL: "https://support.example?", message: "query"},
+		{name: "fragment", publicURL: "https://support.example#receipt", message: "fragment"},
+	}
+	for _, test := range invalidPublicURLs {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("SUPPORT_PUBLIC_URL", test.publicURL)
+			if _, err := FromEnvironment(); err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("production public URL error = %v, want %q", err, test.message)
+			}
+		})
 	}
 	t.Setenv("SUPPORT_PUBLIC_URL", "https://support.example")
 	t.Setenv("SUPPORT_ADMIN_PASSWORD_HASH", "plaintext")

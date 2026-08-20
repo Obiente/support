@@ -2,8 +2,8 @@
 
 ## Required production configuration
 
-- `SUPPORT_PUBLIC_URL`: canonical HTTPS origin, for example `https://support.obiente.org`.
-- `SUPPORT_ENVIRONMENT=production`: rejects a non-HTTPS public URL.
+- `SUPPORT_PUBLIC_URL`: canonical HTTPS origin. The Obiente deployment uses `https://support.obiente.org`.
+- `SUPPORT_ENVIRONMENT=production`: requires `SUPPORT_PUBLIC_URL` and rejects HTTP, user information, non-root paths, queries, and fragments.
 - `SUPPORT_DATA_KEY`: base64-encoded 32-byte key from a cryptographically secure source.
 - `DATABASE_URL`: PostgreSQL connection with a dedicated least-privilege database user.
 - `SUPPORT_OBJECT_ROOT`: optional object-root override. The production image uses `/data/private`; mount the persistent private-data volume at `/data`.
@@ -13,7 +13,7 @@
 
 Terminate HTTPS at a trusted reverse proxy. Do not expose PostgreSQL or the private object volume. Do not enable request-body logging at the proxy.
 
-The production image builds both the Vue portal and Go service and declares a Docker health check against `GET /healthz`. The probe uses `SUPPORT_ADDRESS` when set and defaults to port 8080. It does not require a shell or additional utility in the final image.
+The production image and Compose service default to `SUPPORT_PUBLIC_URL=https://support.obiente.org` and `SUPPORT_ENVIRONMENT=production`. Override the public URL only when deploying a separate support origin. The production image builds both the Vue portal and Go service and declares a Docker health check against `GET /healthz`. The probe uses `SUPPORT_ADDRESS` when set and defaults to port 8080. It does not require a shell or additional utility in the final image.
 
 ## Maintainer access
 
