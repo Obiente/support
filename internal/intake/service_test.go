@@ -34,6 +34,14 @@ func TestSubmitReconcilesWithoutDuplicatingPrivateReport(t *testing.T) {
 	if first.SupportCode != second.SupportCode || first.StatusURL != reconciled.StatusURL {
 		t.Fatalf("receipts differ: first=%#v second=%#v reconciled=%#v", first, second, reconciled)
 	}
+	for name, receipt := range map[string]domain.Receipt{"initial": first, "retry": second, "reconciled": reconciled} {
+		if !strings.HasPrefix(receipt.StatusURL, "https://support.obiente.org/r/") {
+			t.Fatalf("%s status URL = %q, want canonical configured origin", name, receipt.StatusURL)
+		}
+		if receipt.DeletionURL != receipt.StatusURL {
+			t.Fatalf("%s deletion URL = %q, want %q", name, receipt.DeletionURL, receipt.StatusURL)
+		}
+	}
 	if len(objects.Values) != 1 {
 		t.Fatalf("private object count = %d, want 1", len(objects.Values))
 	}
@@ -237,7 +245,7 @@ func testService(t *testing.T) (*Service, *store.Memory, *store.MemoryObjects) {
 	}
 	reports := store.NewMemory()
 	objects := store.NewMemoryObjects()
-	service := New(reports, objects, registry, box, "https://support.example")
+	service := New(reports, objects, registry, box, "https://support.obiente.org")
 	service.now = func() time.Time { return time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC) }
 	return service, reports, objects
 }

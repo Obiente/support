@@ -15,6 +15,8 @@ RUN mkdir -p /out/private
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /
+ENV SUPPORT_PUBLIC_URL=https://support.obiente.org \
+    SUPPORT_ENVIRONMENT=production
 COPY --from=build /out/support /support
 COPY --from=frontend /src/frontend/dist ./frontend/dist
 COPY --chown=65532:65532 --from=build /out/private ./data/private

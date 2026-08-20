@@ -30,7 +30,7 @@ Requirements:
 - Node.js 22 or newer
 - PostgreSQL 17
 
-Create a data key and local environment file:
+Create a data key and local development environment file:
 
 ```bash
 cp .env.example .env
@@ -59,13 +59,13 @@ go run ./cmd/support
 
 For Vue hot reload, keep a built portal available for the Go process, set `SUPPORT_PUBLIC_URL=http://localhost:5173`, run `npm run dev`, and open port 5173. Vite proxies `/api` to the Go service on port 8080.
 
-For the production-shaped single-container build:
+For the production single-container build:
 
 ```bash
 docker compose up --build
 ```
 
-The support image contains both the built Vue portal and Go service. Mount persistent encrypted report storage at `/data`; the service stores diagnostic objects under `/data/private`. Runtime configuration is supplied through environment variables and is not built into the image.
+The image and Compose service default to `SUPPORT_PUBLIC_URL=https://support.obiente.org` and `SUPPORT_ENVIRONMENT=production`. The development `.env` created above overrides those values, so do not reuse it for a production deployment. Production refuses to start when its public URL is missing or is not a plain HTTPS origin. The support image contains both the built Vue portal and Go service. Mount persistent encrypted report storage at `/data`; the service stores diagnostic objects under `/data/private`.
 
 The public intake is at `/`. Maintainers sign in at `/admin/login`. Admin credentials are runtime configuration; no default password is included in the image.
 
