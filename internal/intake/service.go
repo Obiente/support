@@ -26,13 +26,14 @@ import (
 )
 
 var (
-	ErrInvalid      = errors.New("invalid report")
-	ErrNotFound     = errors.New("report not found")
-	ErrKeyReused    = errors.New("idempotency key was already used for another report")
-	ErrCancelled    = errors.New("report submission was cancelled")
-	idempotencyKey  = regexp.MustCompile(`^[A-Za-z0-9_-]{32,128}$`)
-	productID       = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
-	archiveFileName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$`)
+	ErrInvalid                = errors.New("invalid report")
+	ErrNotFound               = errors.New("report not found")
+	ErrDiagnosticsUnavailable = errors.New("diagnostic archive unavailable")
+	ErrKeyReused              = errors.New("idempotency key was already used for another report")
+	ErrCancelled              = errors.New("report submission was cancelled")
+	idempotencyKey            = regexp.MustCompile(`^[A-Za-z0-9_-]{32,128}$`)
+	productID                 = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
+	archiveFileName           = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$`)
 )
 
 type Submission struct {
@@ -284,7 +285,7 @@ func (service *Service) AdminList(ctx context.Context, status *domain.ReportStat
 		if openErr != nil {
 			return nil, 0, openErr
 		}
-		result = append(result, adminSummary(report, payload))
+		result = append(result, service.adminSummary(report, payload))
 	}
 	return result, total, nil
 }
@@ -305,7 +306,7 @@ func (service *Service) AdminDetail(ctx context.Context, id string) (domain.Admi
 	if err != nil {
 		return domain.AdminReportDetail{}, err
 	}
-	return adminDetail(report, payload, messages), nil
+	return service.adminDetail(report, payload, messages), nil
 }
 
 func (service *Service) AdminDiagnostics(ctx context.Context, id string) ([]byte, string, error) {
@@ -318,7 +319,7 @@ func (service *Service) AdminDiagnostics(ctx context.Context, id string) ([]byte
 	}
 	content, err := service.objects.Get(*report.DiagnosticObjectKey, report.ID)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, "", ErrNotFound
+		return nil, "", ErrDiagnosticsUnavailable
 	}
 	return content, report.SupportCode + "-diagnostics.zip", err
 }
@@ -342,7 +343,7 @@ func (service *Service) AdminUpdateStatus(ctx context.Context, id string, status
 	if err != nil {
 		return domain.AdminReportDetail{}, err
 	}
-	return adminDetail(report, payload, messages), nil
+	return service.adminDetail(report, payload, messages), nil
 }
 
 func (service *Service) AdminMessage(ctx context.Context, id, body string) (domain.AdminReportDetail, error) {
@@ -366,7 +367,7 @@ func (service *Service) AdminMessage(ctx context.Context, id, body string) (doma
 	if err != nil {
 		return domain.AdminReportDetail{}, err
 	}
-	return adminDetail(report, payload, messages), nil
+	return service.adminDetail(report, payload, messages), nil
 }
 
 func (service *Service) addMessage(ctx context.Context, report domain.Report, author domain.MessageAuthor, body string, status *domain.ReportStatus) (domain.Report, error) {
@@ -420,18 +421,19 @@ func (service *Service) openPrivatePayload(report domain.Report) (domain.Private
 	return payload, nil
 }
 
-func adminSummary(report domain.Report, payload domain.PrivatePayload) domain.AdminReportSummary {
+func (service *Service) adminSummary(report domain.Report, payload domain.PrivatePayload) domain.AdminReportSummary {
 	return domain.AdminReportSummary{
 		ID: report.ID, SupportCode: report.SupportCode, ProductID: report.ProductID,
 		RequestType: report.RequestType, Status: report.Status, Source: payload.Source,
 		Title: payload.Title, HasDiagnostics: report.DiagnosticObjectKey != nil,
-		CreatedAt: report.CreatedAt, UpdatedAt: report.UpdatedAt, RetentionUntil: report.RetentionUntil,
+		DiagnosticsState: service.diagnosticsState(report),
+		CreatedAt:        report.CreatedAt, UpdatedAt: report.UpdatedAt, RetentionUntil: report.RetentionUntil,
 	}
 }
 
-func adminDetail(report domain.Report, payload domain.PrivatePayload, messages []domain.Message) domain.AdminReportDetail {
+func (service *Service) adminDetail(report domain.Report, payload domain.PrivatePayload, messages []domain.Message) domain.AdminReportDetail {
 	return domain.AdminReportDetail{
-		AdminReportSummary: adminSummary(report, payload), Description: payload.Description,
+		AdminReportSummary: service.adminSummary(report, payload), Description: payload.Description,
 		Contact: payload.Contact, Release: payload.Release, Messages: messages,
 	}
 }
@@ -609,4 +611,18 @@ func randomUUID() (string, error) {
 	value[8] = value[8]&0x3f | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		value[0:4], value[4:6], value[6:8], value[8:10], value[10:16]), nil
+}
+
+func (service *Service) diagnosticsState(report domain.Report) string {
+	if report.DiagnosticObjectKey == nil {
+		return "none"
+	}
+	exists, err := service.objects.Exists(*report.DiagnosticObjectKey)
+	if err != nil {
+		return "unknown"
+	}
+	if !exists {
+		return "unavailable"
+	}
+	return "available"
 }

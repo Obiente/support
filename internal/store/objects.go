@@ -13,6 +13,7 @@ import (
 var objectKeyPattern = regexp.MustCompile(`^[a-f0-9]{64}\.enc$`)
 
 type Objects interface {
+	Exists(key string) (bool, error)
 	Put(key, reportID string, plaintext []byte) error
 	Get(key, reportID string) ([]byte, error)
 	Delete(key string) error
@@ -112,4 +113,23 @@ func (objects *MemoryObjects) Get(key, _ string) ([]byte, error) {
 func (objects *MemoryObjects) Delete(key string) error {
 	delete(objects.Values, key)
 	return nil
+}
+
+func (objects *FileObjects) Exists(key string) (bool, error) {
+	if !objectKeyPattern.MatchString(key) {
+		return false, errors.New("invalid private object key")
+	}
+	info, err := os.Stat(filepath.Join(objects.root, key))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return info.Mode().IsRegular(), nil
+}
+
+func (objects *MemoryObjects) Exists(key string) (bool, error) {
+	_, exists := objects.Values[key]
+	return exists, nil
 }
