@@ -409,7 +409,11 @@ components:
         status: { $ref: "#/components/schemas/ReportStatus" }
         source: { enum: [web, app] }
         title: { type: string }
-        hasDiagnostics: { type: boolean }
+        hasDiagnostics: { type: boolean, description: Whether a diagnostic archive was attached to the report. }
+        diagnosticsState:
+          type: string
+          enum: [none, available, unavailable, unknown]
+          description: Current private object storage availability; unknown means the storage check failed.
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         retentionUntil: { type: string, format: date-time }

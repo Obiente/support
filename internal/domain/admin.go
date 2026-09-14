@@ -19,17 +19,18 @@ type AdminAudit struct {
 }
 
 type AdminReportSummary struct {
-	ID             string       `json:"id"`
-	SupportCode    string       `json:"supportCode"`
-	ProductID      string       `json:"productId"`
-	RequestType    RequestType  `json:"requestType"`
-	Status         ReportStatus `json:"status"`
-	Source         string       `json:"source"`
-	Title          string       `json:"title"`
-	HasDiagnostics bool         `json:"hasDiagnostics"`
-	CreatedAt      time.Time    `json:"createdAt"`
-	UpdatedAt      time.Time    `json:"updatedAt"`
-	RetentionUntil time.Time    `json:"retentionUntil"`
+	DiagnosticsState string       `json:"diagnosticsState"`
+	ID               string       `json:"id"`
+	SupportCode      string       `json:"supportCode"`
+	ProductID        string       `json:"productId"`
+	RequestType      RequestType  `json:"requestType"`
+	Status           ReportStatus `json:"status"`
+	Source           string       `json:"source"`
+	Title            string       `json:"title"`
+	HasDiagnostics   bool         `json:"hasDiagnostics"`
+	CreatedAt        time.Time    `json:"createdAt"`
+	UpdatedAt        time.Time    `json:"updatedAt"`
+	RetentionUntil   time.Time    `json:"retentionUntil"`
 }
 
 type AdminReportDetail struct {

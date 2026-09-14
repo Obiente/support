@@ -306,6 +306,8 @@ func (server *Server) writeAdminError(response http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, intake.ErrInvalid):
 		writeProblem(response, http.StatusBadRequest, "invalid_request", "The admin request is invalid.")
+	case errors.Is(err, intake.ErrDiagnosticsUnavailable):
+		writeProblem(response, http.StatusServiceUnavailable, "diagnostics_unavailable", "The report is available, but its diagnostic archive is unavailable. Check private archive storage or request a new report.")
 	case errors.Is(err, intake.ErrNotFound):
 		writeProblem(response, http.StatusNotFound, "not_found", "The private report is not available.")
 	default:

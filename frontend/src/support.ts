@@ -80,6 +80,7 @@ export interface AdminReportSummary {
   source: 'web' | 'app'
   title: string
   hasDiagnostics: boolean
+  diagnosticsState?: 'none' | 'available' | 'unavailable' | 'unknown'
   createdAt: string
   updatedAt: string
   retentionUntil: string

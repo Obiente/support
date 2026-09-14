@@ -99,3 +99,18 @@ See [docs/threat-model.md](docs/threat-model.md), [docs/operations.md](docs/oper
 ## License
 
 GNU Affero General Public License v3.0. See [LICENSE](LICENSE).
+
+## Diagnostic archive availability
+
+Admin responses retain `hasDiagnostics` as evidence that an archive was attached.
+The additive `diagnosticsState` field reports `none`, `available`, `unavailable`,
+or `unknown` after checking private object storage. Missing objects do not delete
+report metadata or change report status. Downloads of a missing attached object
+return `503 diagnostics_unavailable`; an unknown report still returns 404.
+
+Production deployments must reuse the same persistent `/data` volume on every
+redeploy, together with the database and encryption key. The Dockerfile volume
+declaration alone does not ensure that a deployment platform reattaches the same
+volume. Back up encrypted objects, database records, and the separately protected
+key together. Restore missing objects from a verified backup; do not mark their
+reports resolved merely because metadata remains readable.

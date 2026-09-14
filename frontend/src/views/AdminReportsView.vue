@@ -133,7 +133,9 @@ function readable(value: string): string {
             <span class="report-list-meta"><b>{{ report.supportCode }}</b><span>{{ readable(report.status) }}</span></span>
             <strong>{{ report.title }}</strong>
             <span>{{ report.productId }} · {{ report.source }} · {{ formatDate(report.createdAt) }}</span>
-            <small v-if="report.hasDiagnostics">Diagnostic ZIP attached</small>
+            <small v-if="report.diagnosticsState === 'unavailable'">Diagnostic ZIP unavailable</small>
+            <small v-else-if="report.diagnosticsState === 'unknown'">Diagnostic storage could not be checked</small>
+            <small v-else-if="report.hasDiagnostics">Diagnostic ZIP attached</small>
           </button>
           <p v-if="reports.length === 0">No reports match this status.</p>
         </section>
@@ -167,7 +169,9 @@ function readable(value: string): string {
                 <button class="primary" type="submit" :disabled="saving || !reply.trim()">{{ saving ? 'Sending...' : 'Send private message' }}</button>
               </form>
             </div>
-            <a v-if="selected.hasDiagnostics" class="secondary diagnostic-download" :href="adminDiagnosticsURL(selected.id)">Download diagnostic ZIP</a>
+            <a v-if="selected.hasDiagnostics && selected.diagnosticsState !== 'unavailable' && selected.diagnosticsState !== 'unknown'" class="secondary diagnostic-download" :href="adminDiagnosticsURL(selected.id)">Download diagnostic ZIP</a>
+            <p v-if="selected.diagnosticsState === 'unavailable'" role="status">The report is retained, but its diagnostic ZIP is unavailable. Check the private archive storage or request a new diagnostic report.</p>
+            <p v-else-if="selected.diagnosticsState === 'unknown'" role="status">Diagnostic storage could not be checked. Reload this report after storage is available.</p>
             <p class="private-warning">Private report data must not be copied into a public issue without reviewing and removing personal information.</p>
           </template>
           <p v-else>Select a report to review its private details.</p>
