@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"net/url"
@@ -87,7 +88,7 @@ func insertLegacyReport(t *testing.T, ctx context.Context, postgres *Postgres, i
 		diagnostic_object_key, idempotency_hash, request_hash, capability_hash, created_at, updated_at,
 		retention_until, deleted_at
 	) VALUES ($1, $2, 'synthetic-product', 'bug', 'new', '\x00', '\x00', $3, $4, $4, $5, $6, $6, $7, $8)`,
-		id, "OBI-TEST"+id[len(id)-1:]+"-23456", objectKey, []byte("idempotency-"+id), []byte("capability-"+id),
+		id, "OBI-TEST"+id[len(id)-1:]+"-23456", objectKey, digest("idempotency-"+id), digest("capability-"+id),
 		createdAt, retentionUntil, deletedAt)
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +160,7 @@ func TestPostgresCreatesReportsWithoutDeadlineAndAdminDeleteRevokes(t *testing.T
 	report := domain.Report{
 		ID: "00000000-0000-4000-8000-0000000000b1", SupportCode: "OBI-NEWRP-23456", ProductID: "synthetic-product",
 		RequestType: domain.RequestBug, Status: domain.StatusNew, PrivatePayload: []byte{1}, CapabilityCiphertext: []byte{1},
-		IdempotencyHash: []byte("idempotency-new"), RequestHash: []byte("request-new"), CapabilityHash: []byte("capability-new"),
+		IdempotencyHash: digest("idempotency-new"), RequestHash: digest("request-new"), CapabilityHash: digest("capability-new"),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := postgres.Create(ctx, report); err != nil {
@@ -182,4 +183,10 @@ func TestPostgresCreatesReportsWithoutDeadlineAndAdminDeleteRevokes(t *testing.T
 	if err := postgres.PurgeDeleted(ctx, report.ID); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// digest returns a 32-byte SHA-256 value, matching the hashes the service stores.
+func digest(value string) []byte {
+	sum := sha256.Sum256([]byte(value))
+	return sum[:]
 }
