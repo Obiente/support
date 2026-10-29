@@ -50,7 +50,7 @@ Reports, their conversations, and their diagnostic objects are kept until the re
 
 Deleting a live report immediately revokes its capability and removes its diagnostic object. An hourly task hard-deletes revoked rows. Diagnostic object deletion must succeed before database hard deletion so an orphaned encrypted object remains discoverable for a later retry.
 
-A missing diagnostic object never deletes or changes a report. Startup refuses to continue when the object root is not writable and logs the number of live reports whose diagnostic object is missing, so a detached or replaced volume is visible instead of silently losing attachments.
+A missing diagnostic object never deletes or changes a report. Startup refuses to continue when the object root is not writable or when its `.storage-id` marker does not match the storage ID recorded in the database, so uploads and deletions never run against a replacement volume. It also logs the number of live reports whose diagnostic object is missing and of stored objects that no report references. An explicit, logged operator override can rebind the database to another volume for recovery. Orphaned objects stay sealed to their deleted report ID and are not readable through the service.
 
 Contract version 1 responses still contain `retentionUntil`, always `createdAt` plus 30 days, because released clients require it. It is informational only and is not a deletion date.
 

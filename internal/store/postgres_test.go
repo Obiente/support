@@ -190,3 +190,43 @@ func digest(value string) []byte {
 	sum := sha256.Sum256([]byte(value))
 	return sum[:]
 }
+
+func TestPostgresStorageIdentityAndObjectReferences(t *testing.T) {
+	postgres, ctx := testPostgres(t)
+	if err := postgres.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := postgres.StorageID(ctx); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unbound storage ID error = %v, want ErrNotFound", err)
+	}
+	first, second := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	now := time.Now().UTC()
+	if bound, err := postgres.BindStorageID(ctx, first, now); err != nil || bound != first {
+		t.Fatalf("first bind = %q, %v", bound, err)
+	}
+	if bound, err := postgres.BindStorageID(ctx, second, now); err != nil || bound != first {
+		t.Fatalf("second bind = %q, %v; want the first ID kept", bound, err)
+	}
+	if err := postgres.RebindStorageID(ctx, second, now); err != nil {
+		t.Fatal(err)
+	}
+	if bound, err := postgres.StorageID(ctx); err != nil || bound != second {
+		t.Fatalf("rebound ID = %q, %v", bound, err)
+	}
+	if err := postgres.RebindStorageID(ctx, "not-hex", now); err == nil {
+		t.Fatal("malformed storage ID was stored")
+	}
+
+	deletedAt := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	const live, revoked = "00000000-0000-4000-8000-0000000000c1", "00000000-0000-4000-8000-0000000000c2"
+	insertLegacyReport(t, ctx, postgres, live, now, now, nil)
+	insertLegacyReport(t, ctx, postgres, revoked, now, now, &deletedAt)
+	liveKey, revokedKey, orphanKey := strings.Repeat("c1", 32)+".enc", strings.Repeat("c2", 32)+".enc", strings.Repeat("ff", 32)+".enc"
+	referenced, err := postgres.ReferencedObjectKeys(ctx, []string{liveKey, revokedKey, orphanKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !referenced[liveKey] || !referenced[revokedKey] || referenced[orphanKey] {
+		t.Fatalf("referenced keys = %v", referenced)
+	}
+}

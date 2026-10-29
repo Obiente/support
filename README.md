@@ -65,7 +65,7 @@ For the production single-container build:
 docker compose up --build
 ```
 
-The image and Compose service default to `SUPPORT_PUBLIC_URL=https://support.obiente.org` and `SUPPORT_ENVIRONMENT=production`. The development `.env` created above overrides those values, so do not reuse it for a production deployment. Production refuses to start when its public URL is missing or is not a plain HTTPS origin. The support image contains both the built Vue portal and Go service. Mount persistent encrypted report storage at `/data`; the service stores diagnostic objects under `/data/private` and refuses to start when that directory is not writable. Reattach the same volume on every redeploy, because the service keeps reports until they are deleted.
+The image and Compose service default to `SUPPORT_PUBLIC_URL=https://support.obiente.org` and `SUPPORT_ENVIRONMENT=production`. The development `.env` created above overrides those values, so do not reuse it for a production deployment. Production refuses to start when its public URL is missing or is not a plain HTTPS origin. The support image contains both the built Vue portal and Go service. Mount persistent encrypted report storage at `/data`; the service stores diagnostic objects under `/data/private` and refuses to start when that directory is not writable or is not the volume the database was written against (checked through a `.storage-id` marker). The image does not declare a Docker `VOLUME`, so a container started without a mount fails instead of silently using an anonymous volume. Reattach the same volume on every redeploy, because the service keeps reports until they are deleted.
 
 The public intake is at `/`. Maintainers sign in at `/admin/login`. Admin credentials are runtime configuration; no default password is included in the image.
 
@@ -108,13 +108,13 @@ The additive `diagnosticsState` field reports `none`, `available`, `unavailable`
 or `unknown` after checking private object storage. Missing objects do not delete
 report metadata or change report status. At startup the service logs a warning
 that names the object root and counts live reports whose diagnostic object is
-missing. Downloads of a missing attached object
+missing and stored objects that no report references. Downloads of a missing attached object
 return `503 diagnostics_unavailable`; an unknown report still returns 404.
 
 Production deployments must reuse the same persistent `/data` volume on every
-redeploy, together with the database and encryption key. The Dockerfile volume
-declaration alone does not ensure that a deployment platform reattaches the same
-volume. Back up encrypted objects, database records, and the separately protected
+redeploy, together with the database and encryption key. The image declares no
+Docker volume, and startup refuses an object root whose `.storage-id` marker does
+not match the database. Back up encrypted objects, database records, and the separately protected
 key together. Restore missing objects from a verified backup; do not mark their
 reports resolved merely because metadata remains readable. See
 [docs/operations.md](docs/operations.md#restoring-missing-diagnostic-objects).

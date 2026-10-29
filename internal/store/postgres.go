@@ -159,6 +159,51 @@ func (postgres *Postgres) PurgeDeleted(ctx context.Context, id string) error {
 	return nil
 }
 
+func (postgres *Postgres) ReferencedObjectKeys(ctx context.Context, keys []string) (map[string]bool, error) {
+	referenced := make(map[string]bool, len(keys))
+	if len(keys) == 0 {
+		return referenced, nil
+	}
+	rows, err := postgres.pool.Query(ctx, `SELECT diagnostic_object_key FROM support_reports
+		WHERE diagnostic_object_key = ANY($1)`, keys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		referenced[key] = true
+	}
+	return referenced, rows.Err()
+}
+
+func (postgres *Postgres) StorageID(ctx context.Context) (string, error) {
+	var id string
+	err := postgres.pool.QueryRow(ctx, `SELECT storage_id FROM support_storage_identity WHERE singleton`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
+}
+
+func (postgres *Postgres) BindStorageID(ctx context.Context, id string, now time.Time) (string, error) {
+	if _, err := postgres.pool.Exec(ctx, `INSERT INTO support_storage_identity (singleton, storage_id, bound_at)
+		VALUES (TRUE, $1, $2) ON CONFLICT (singleton) DO NOTHING`, id, now); err != nil {
+		return "", err
+	}
+	return postgres.StorageID(ctx)
+}
+
+func (postgres *Postgres) RebindStorageID(ctx context.Context, id string, now time.Time) error {
+	_, err := postgres.pool.Exec(ctx, `INSERT INTO support_storage_identity (singleton, storage_id, bound_at)
+		VALUES (TRUE, $1, $2)
+		ON CONFLICT (singleton) DO UPDATE SET storage_id = EXCLUDED.storage_id, bound_at = EXCLUDED.bound_at`, id, now)
+	return err
+}
+
 func (postgres *Postgres) DiagnosticReferences(ctx context.Context, afterID string, limit int) ([]domain.DiagnosticReference, error) {
 	rows, err := postgres.pool.Query(ctx, `SELECT id::text, diagnostic_object_key FROM support_reports
 		WHERE deleted_at IS NULL AND diagnostic_object_key IS NOT NULL AND id > $1::uuid

@@ -29,6 +29,9 @@ type Reports interface {
 	// PurgeDeleted hard-deletes one revoked report. It returns ErrNotFound for
 	// a live or unknown report.
 	PurgeDeleted(context.Context, string) error
+	// ReferencedObjectKeys returns which of the given object keys any report
+	// row, live or revoked, still references.
+	ReferencedObjectKeys(context.Context, []string) (map[string]bool, error)
 	// DiagnosticReferences pages live reports with an attached diagnostic
 	// object in ascending report ID order, starting after the given UUID.
 	DiagnosticReferences(context.Context, string, int) ([]domain.DiagnosticReference, error)
@@ -48,4 +51,17 @@ type AdminSessions interface {
 	DeleteAdminSession(context.Context, []byte) error
 	DeleteExpiredAdminSessions(context.Context, time.Time) error
 	RecordAdminAudit(context.Context, domain.AdminAudit) error
+}
+
+// StorageIdentities holds the ID of the private object volume the database was
+// written against.
+type StorageIdentities interface {
+	// StorageID returns ErrNotFound when no volume has been bound yet.
+	StorageID(context.Context) (string, error)
+	// BindStorageID records the ID only when none is bound and returns the ID
+	// that is bound afterwards.
+	BindStorageID(context.Context, string, time.Time) (string, error)
+	// RebindStorageID replaces the bound ID. It is used only for an explicit
+	// operator override.
+	RebindStorageID(context.Context, string, time.Time) error
 }

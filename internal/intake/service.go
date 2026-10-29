@@ -652,16 +652,19 @@ func (service *Service) diagnosticsState(report domain.Report) string {
 	return "available"
 }
 
-// DiagnosticInventory summarizes the private objects referenced by live reports.
+// DiagnosticInventory summarizes the private objects referenced by live reports
+// and the stored objects that no report row references.
 type DiagnosticInventory struct {
 	Attached int
 	Missing  int
 	Unknown  int
+	Orphaned int
 }
 
 // InventoryDiagnostics checks every live report with an attached diagnostic
-// object. It only reads object metadata and never changes or deletes a report,
-// so a lost or detached volume becomes visible without losing report records.
+// object and counts stored objects that no report row, live or revoked,
+// references. It only reads metadata and never changes or deletes a report or
+// an object, so a lost or detached volume becomes visible without losing data.
 func (service *Service) InventoryDiagnostics(ctx context.Context) (DiagnosticInventory, error) {
 	const pageSize = 500
 	var inventory DiagnosticInventory
@@ -682,11 +685,28 @@ func (service *Service) InventoryDiagnostics(ctx context.Context) (DiagnosticInv
 			}
 		}
 		if len(references) < pageSize {
-			return inventory, nil
+			break
 		}
 		cursor = references[len(references)-1].ReportID
 		if err := ctx.Err(); err != nil {
 			return inventory, err
 		}
 	}
+	keys, err := service.objects.Keys()
+	if err != nil {
+		return inventory, fmt.Errorf("list private objects: %w", err)
+	}
+	for start := 0; start < len(keys); start += pageSize {
+		batch := keys[start:min(start+pageSize, len(keys))]
+		referenced, err := service.reports.ReferencedObjectKeys(ctx, batch)
+		if err != nil {
+			return inventory, err
+		}
+		for _, key := range batch {
+			if !referenced[key] {
+				inventory.Orphaned++
+			}
+		}
+	}
+	return inventory, nil
 }

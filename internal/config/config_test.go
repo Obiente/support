@@ -55,3 +55,27 @@ func TestProductionRequiresHTTPSAndBcryptAdminCredentials(t *testing.T) {
 		t.Fatalf("plaintext admin password error = %v", err)
 	}
 }
+
+func TestStorageAdoptOverrideIsExplicit(t *testing.T) {
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("test password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SUPPORT_ENVIRONMENT", "development")
+	t.Setenv("DATABASE_URL", "postgres://support:test@database/support")
+	t.Setenv("SUPPORT_DATA_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("SUPPORT_ADMIN_USERNAME", "maintainer")
+	t.Setenv("SUPPORT_ADMIN_PASSWORD_HASH", string(passwordHash))
+
+	for value, want := range map[string]bool{"": false, "0": false, "1": true, "true": true} {
+		t.Setenv("SUPPORT_STORAGE_ADOPT", value)
+		configuration, err := FromEnvironment()
+		if err != nil || configuration.StorageAdopt != want {
+			t.Fatalf("SUPPORT_STORAGE_ADOPT=%q: adopt = %v, %v; want %v", value, configuration.StorageAdopt, err, want)
+		}
+	}
+	t.Setenv("SUPPORT_STORAGE_ADOPT", "maybe")
+	if _, err := FromEnvironment(); err == nil {
+		t.Fatal("an ambiguous SUPPORT_STORAGE_ADOPT value was accepted")
+	}
+}

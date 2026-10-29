@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -56,5 +57,29 @@ func TestVerifyObjectRootRejectsReadOnlyDirectory(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
 	if err := VerifyObjectRoot(root); err == nil {
 		t.Fatal("read-only object root was accepted")
+	}
+}
+
+func TestFileObjectKeysIgnoreMarkerAndTemporaryFiles(t *testing.T) {
+	root := t.TempDir()
+	objects, err := NewFileObjects(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objectKey := strings.Repeat("c", 64) + ".enc"
+	for _, name := range []string{objectKey, StorageMarkerName, ".upload-123.tmp", ".storage-id-123.tmp", "notes.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(root, strings.Repeat("d", 64)+".enc"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := objects.Keys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 || keys[0] != objectKey {
+		t.Fatalf("object keys = %v, want only %s", keys, objectKey)
 	}
 }

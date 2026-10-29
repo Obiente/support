@@ -17,6 +17,7 @@ type Memory struct {
 	sessions      []domain.AdminSession
 	messages      []domain.Message
 	audits        []domain.AdminAudit
+	storageID     string
 }
 
 func NewMemory() *Memory { return &Memory{cancellations: make(map[string]time.Time)} }
@@ -125,6 +126,46 @@ func (memory *Memory) PurgeDeleted(_ context.Context, id string) error {
 		}
 	}
 	return ErrNotFound
+}
+
+func (memory *Memory) ReferencedObjectKeys(_ context.Context, keys []string) (map[string]bool, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	referenced := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		for _, report := range memory.reports {
+			if report.DiagnosticObjectKey != nil && *report.DiagnosticObjectKey == key {
+				referenced[key] = true
+				break
+			}
+		}
+	}
+	return referenced, nil
+}
+
+func (memory *Memory) StorageID(context.Context) (string, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	if memory.storageID == "" {
+		return "", ErrNotFound
+	}
+	return memory.storageID, nil
+}
+
+func (memory *Memory) BindStorageID(_ context.Context, id string, _ time.Time) (string, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	if memory.storageID == "" {
+		memory.storageID = id
+	}
+	return memory.storageID, nil
+}
+
+func (memory *Memory) RebindStorageID(_ context.Context, id string, _ time.Time) error {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	memory.storageID = id
+	return nil
 }
 
 func (memory *Memory) DiagnosticReferences(_ context.Context, afterID string, limit int) ([]domain.DiagnosticReference, error) {

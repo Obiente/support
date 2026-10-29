@@ -41,9 +41,22 @@ func TestDiagnosticInventoryWarnsAboutMissingObjectsWithoutDeletingReports(t *te
 
 	reportDiagnosticInventory(context.Background(), logger, "/data/private", service)
 	entry := lastLogEntry(t, &output)
-	if entry["level"] != "INFO" || entry["missing"] != float64(0) || entry["attached"] != float64(1) {
+	if entry["level"] != "INFO" || entry["missing"] != float64(0) || entry["attached"] != float64(1) || entry["orphaned"] != float64(0) {
 		t.Fatalf("healthy inventory log = %v", entry)
 	}
+
+	orphanKey := strings.Repeat("0f", 32) + ".enc"
+	objects.Values[orphanKey] = []byte("sealed for a purged report")
+	output.Reset()
+	reportDiagnosticInventory(context.Background(), logger, "/data/private", service)
+	entry = lastLogEntry(t, &output)
+	if entry["level"] != "WARN" || entry["object_root"] != "/data/private" || entry["orphaned"] != float64(1) || entry["missing"] != float64(0) {
+		t.Fatalf("orphaned-object inventory log = %v", entry)
+	}
+	if strings.Contains(output.String(), orphanKey) || len(objects.Values) != 2 {
+		t.Fatalf("inventory logged an object key or removed the orphan: %s", output.String())
+	}
+	delete(objects.Values, orphanKey)
 
 	for key := range objects.Values {
 		delete(objects.Values, key)
@@ -119,4 +132,35 @@ func diagnosticArchive(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return content.Bytes()
+}
+
+func TestCheckStorageIdentityRefusesAnotherVolumeAndLogsOverride(t *testing.T) {
+	root := t.TempDir()
+	reports := store.NewMemory()
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	if err := checkStorageIdentity(context.Background(), logger, root, reports, false); err != nil {
+		t.Fatal(err)
+	}
+	if entry := lastLogEntry(t, &output); entry["binding"] != "created" {
+		t.Fatalf("fresh binding log = %v", entry)
+	}
+
+	replacement := t.TempDir()
+	err := checkStorageIdentity(context.Background(), logger, replacement, reports, false)
+	if err == nil || !strings.Contains(err.Error(), "refusing to start") || !strings.Contains(err.Error(), replacement) {
+		t.Fatalf("replacement volume error = %v", err)
+	}
+
+	output.Reset()
+	if err := checkStorageIdentity(context.Background(), logger, replacement, reports, true); err != nil {
+		t.Fatal(err)
+	}
+	entry := lastLogEntry(t, &output)
+	if entry["level"] != "ERROR" || !strings.Contains(entry["msg"].(string), "SUPPORT_STORAGE_ADOPT") || entry["previous_storage_id"] == "" {
+		t.Fatalf("override log = %v", entry)
+	}
+	if err := checkStorageIdentity(context.Background(), logger, root, reports, false); err == nil {
+		t.Fatal("the original volume was still accepted after an explicit rebind")
+	}
 }

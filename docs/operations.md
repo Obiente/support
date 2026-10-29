@@ -10,6 +10,7 @@
 - `SUPPORT_WEB_ROOT`: built Vue distribution included in the production image.
 - `SUPPORT_ADMIN_USERNAME`: the initial maintainer username. Use a distinct non-email identifier.
 - `SUPPORT_ADMIN_PASSWORD_HASH`: a bcrypt hash, never a plaintext password. Generate one with `htpasswd -bnBC 12 admin 'a-long-password' | cut -d: -f2`.
+- `SUPPORT_STORAGE_ADOPT`: recovery-only override. Leave it unset in normal operation. See [Storage identity refusal](#storage-identity-refusal).
 
 Terminate HTTPS at a trusted reverse proxy. Do not expose PostgreSQL or the private object volume. Do not enable request-body logging at the proxy.
 
@@ -27,14 +28,22 @@ Changing `SUPPORT_ADMIN_PASSWORD_HASH` affects new logins but does not revoke ex
 
 ## Persistent storage
 
-Reports are kept until they are deleted, so the private object volume is durable product data, not a cache. The production `/data` mount must be a persistent volume that the deployment platform reattaches on every redeploy, restart, and image update, together with the same PostgreSQL database and `SUPPORT_DATA_KEY`. The `VOLUME ["/data"]` declaration in the Dockerfile does not guarantee this: many platforms create a new anonymous volume for each container, which silently loses every diagnostic attachment on the next redeploy.
+Reports are kept until they are deleted, so the private object volume is durable product data, not a cache. The production `/data` mount must be a persistent volume that the deployment platform reattaches on every redeploy, restart, and image update, together with the same PostgreSQL database and `SUPPORT_DATA_KEY`.
+
+The image does not declare a Docker `VOLUME`. A declared volume made Docker create a new anonymous volume for any container started without an explicit mount, so a redeploy could silently switch to an empty `/data` while the database kept referencing objects on the old one. Without a mount, the service now fails at the writable probe on a read-only root filesystem (as in `compose.yaml`) or at the storage identity check. The Compose file mounts the named `private_reports` volume at `/data`; Docker fills an empty named volume from the image's `/data/private` directory, including its non-root ownership.
 
 At startup the service:
 
 1. Creates the object root if needed, then creates, syncs, and removes a probe file in it. If any step fails, the service refuses to start and logs `refusing to start without writable persistent private storage` with the cause.
-2. After database migrations, checks every live report that has a diagnostic attachment. It logs `private diagnostic objects verified` with `object_root`, `attached`, and `missing` when every object is present. Otherwise it logs the warning `reports reference unavailable private diagnostic objects; restore the persistent volume or its backup` with `object_root`, `attached`, `missing`, and `unknown` counts.
+2. After database migrations, compares `<object root>/.storage-id` with the storage ID recorded in the `support_storage_identity` table:
+   - When neither exists, it writes a new random ID to the marker (synced temporary file, mode `0600`, linked into place without replacing an existing marker) and then records it in the database.
+   - When only the marker exists, the database adopts its ID.
+   - When the database has an ID and the marker is missing or different, the service refuses to start. See [Storage identity refusal](#storage-identity-refusal). It never rewrites the marker or the database on its own.
+3. Checks every live report that has a diagnostic attachment, and counts stored `*.enc` objects that no report row references. It logs `private diagnostic objects verified` with `object_root`, `attached`, `missing`, and `orphaned` when every referenced object is present and nothing is orphaned. Otherwise it logs a warning with the same fields and `unknown`.
 
-The check only reads object metadata. It never deletes, resolves, or otherwise changes a report because its object is missing. A warning with `missing` above zero after a redeploy usually means the original volume was not reattached. Follow [Restoring missing diagnostic objects](#restoring-missing-diagnostic-objects).
+These checks only read object metadata. They never delete, resolve, or otherwise change a report or an object, and they never log object keys. A warning with `missing` above zero usually means the original volume was not reattached; follow [Restoring missing diagnostic objects](#restoring-missing-diagnostic-objects). A count of `orphaned` objects usually means deletions ran while a different volume was mounted; see [Orphaned diagnostic objects](#orphaned-diagnostic-objects).
+
+The marker starts with a dot and never matches the object key format, so it is never listed, counted, or served as a diagnostic object. Include it in volume backups.
 
 ## Backups
 
@@ -55,6 +64,22 @@ The initial foundation supports one active data key. Do not replace it while pri
 
 Never inspect a real user's plaintext report as a recovery test.
 
+## Storage identity refusal
+
+The error `refusing to start: private object root is not the volume this database was written against` names the object root, the storage ID it found (or that the marker is missing), and the first characters of the storage ID the database expects. It means the container mounted a different `/data` than the one the database was written against. Starting anyway would let uploads land on the wrong volume and let deletions report success for objects that are not there.
+
+1. Find the volume the container actually mounts:
+
+   ```bash
+   docker inspect <container> --format '{{json .Mounts}}'
+   ```
+
+   A mount of type `volume` with a random 64-character name, or no mount at `/data`, means the container is not using the intended persistent volume. Compare the result with the volume the deployment is supposed to use, and list candidate volumes with `docker volume ls`.
+2. Find the right volume by its marker. Each candidate volume's `private/.storage-id` holds a 64-character hex ID; the right one starts with the expected ID printed in the error.
+3. Mount that volume at `/data` and start the service again. Do not copy objects between volumes while the service runs.
+4. If the original volume is gone, restore it from the newest verified backup (the backup includes `.storage-id`), mount it at `/data`, and start the service. Then follow [Restoring missing diagnostic objects](#restoring-missing-diagnostic-objects) for attachments newer than that backup.
+5. Only when the original volume cannot be recovered, or a backup taken before storage markers existed is restored, start the service once with `SUPPORT_STORAGE_ADOPT=1`. This rebinds the database to the mounted volume (writing a new marker if the volume has none) and logs an error-level `SUPPORT_STORAGE_ADOPT rebound the database` entry with the previous and new storage IDs. Remove the variable immediately afterwards; while it is set, the service would accept any volume. Reports whose objects are not on the adopted volume remain listed with unavailable diagnostics.
+
 ## Restoring missing diagnostic objects
 
 Use this runbook when the startup warning reports `missing` above zero, the console shows "Diagnostic ZIP unavailable", or a download returns `503 diagnostics_unavailable`.
@@ -74,6 +99,14 @@ Use this runbook when the startup warning reports `missing` above zero, the cons
 7. Attachments uploaded after the newest backup cannot be recovered. Leave those reports in place and, if the diagnostics are still needed, ask the reporter for a new diagnostic report through the private conversation.
 
 Do not restore the database from an older backup only to recover objects: that would roll back newer reports, messages, status changes, and deletions.
+
+## Orphaned diagnostic objects
+
+An orphaned object is an `*.enc` file in the object root that no report row references, live or revoked. The usual cause is a report row purged while a different volume was mounted: the object deletion found no file on that volume, treated the missing file as already deleted, and the row was removed, leaving the real file behind on the original volume.
+
+Objects are AES-256-GCM sealed with the associated data `<reportID>:diagnostics`. Once a report row is gone, its report ID cannot be recovered from the object, so the object cannot be opened through the service. Do not write or run a tool that bypasses this binding to read orphaned objects.
+
+The service only counts orphans; it never deletes them. They are private data that a reporter or the old retention policy already deleted. After confirming with the incident owner that no report row will be restored for them (for example from a database backup that still has the rows), remove them as a separately authorized operational action and record the count in the incident notes, never the keys.
 
 ## Retention and deletion
 

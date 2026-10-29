@@ -92,6 +92,9 @@ func run(logger *slog.Logger) error {
 	if err := reports.Migrate(startupContext); err != nil {
 		return err
 	}
+	if err := checkStorageIdentity(startupContext, logger, configuration.ObjectRoot, reports, configuration.StorageAdopt); err != nil {
+		return err
+	}
 	registry := products.Default()
 	intakeService := intake.New(reports, objects, registry, box, configuration.PublicURL)
 	adminService := admin.New(reports, configuration.AdminUsername, configuration.AdminPasswordHash)
@@ -142,26 +145,60 @@ func openPrivateObjects(root string, box *cryptobox.Box) (*store.FileObjects, er
 	return objects, nil
 }
 
+// checkStorageIdentity refuses to continue when the object root is not the
+// volume the database was written against, so purges and uploads never run
+// against a replacement volume. SUPPORT_STORAGE_ADOPT is a recovery-only
+// override that rebinds the database to the mounted volume.
+func checkStorageIdentity(ctx context.Context, logger *slog.Logger, objectRoot string, identities store.StorageIdentities, adopt bool) error {
+	check, err := store.EnsureStorageIdentity(ctx, objectRoot, identities, adopt, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("refusing to start: %w", err)
+	}
+	switch check.Binding {
+	case store.StorageRebound:
+		logger.Error("SUPPORT_STORAGE_ADOPT rebound the database to a different private object volume; reports whose objects are not on this volume stay unavailable. Remove SUPPORT_STORAGE_ADOPT after this start",
+			"object_root", objectRoot, "storage_id", check.StorageID, "previous_storage_id", check.PreviousID)
+	case store.StorageMatched:
+		if adopt {
+			logger.Warn("SUPPORT_STORAGE_ADOPT is set but the private object volume already matches; remove the override",
+				"object_root", objectRoot, "storage_id", check.StorageID)
+		} else {
+			logger.Info("private object volume matches the database", "object_root", objectRoot, "storage_id", check.StorageID)
+		}
+	default:
+		logger.Info("private object volume bound to the database",
+			"object_root", objectRoot, "storage_id", check.StorageID, "binding", string(check.Binding))
+	}
+	return nil
+}
+
 // reportDiagnosticInventory logs how many live reports reference a diagnostic
-// object that is missing from the private object root. A count above zero
-// usually means the persistent volume was not reattached. It never changes or
-// deletes a report.
+// object that is missing from the private object root, and how many stored
+// objects no report references. Missing objects usually mean the persistent
+// volume was not reattached; orphaned objects usually mean deletions ran
+// against a different volume. It only counts: it never changes or deletes a
+// report or an object, and never logs object keys.
 func reportDiagnosticInventory(ctx context.Context, logger *slog.Logger, objectRoot string, intakeService *intake.Service) {
 	inventory, err := intakeService.InventoryDiagnostics(ctx)
 	if err != nil {
 		logger.Warn("private diagnostic object inventory did not complete",
 			"object_root", objectRoot, "attached", inventory.Attached, "missing", inventory.Missing,
-			"unknown", inventory.Unknown, "error", err)
+			"unknown", inventory.Unknown, "orphaned", inventory.Orphaned, "error", err)
 		return
 	}
 	if inventory.Missing > 0 || inventory.Unknown > 0 {
 		logger.Warn("reports reference unavailable private diagnostic objects; restore the persistent volume or its backup",
 			"object_root", objectRoot, "attached", inventory.Attached, "missing", inventory.Missing,
-			"unknown", inventory.Unknown)
+			"unknown", inventory.Unknown, "orphaned", inventory.Orphaned)
+		return
+	}
+	if inventory.Orphaned > 0 {
+		logger.Warn("private object root holds diagnostic objects that no report references",
+			"object_root", objectRoot, "attached", inventory.Attached, "missing", 0, "orphaned", inventory.Orphaned)
 		return
 	}
 	logger.Info("private diagnostic objects verified",
-		"object_root", objectRoot, "attached", inventory.Attached, "missing", 0)
+		"object_root", objectRoot, "attached", inventory.Attached, "missing", 0, "orphaned", 0)
 }
 
 // runDeletionPurge completes reporter, cancellation, and maintainer deletions.

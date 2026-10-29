@@ -195,3 +195,40 @@ type failingObjectDelete struct{ *store.MemoryObjects }
 func (failingObjectDelete) Delete(string) error {
 	return errors.New("synthetic object deletion failure")
 }
+
+func TestInventoryDiagnosticsCountsOrphanedObjectsWithoutDeletingThem(t *testing.T) {
+	service, _, objects := testService(t)
+	if _, err := service.Submit(context.Background(), validSubmission(t)); err != nil {
+		t.Fatal(err)
+	}
+	pendingDeletion := validSubmission(t)
+	pendingDeletion.IdempotencyKey = strings.Repeat("E", 43)
+	pendingDeletion.Metadata.Title = "Revoked synthetic failure"
+	if _, err := service.Submit(context.Background(), pendingDeletion); err != nil {
+		t.Fatal(err)
+	}
+	listed, _, err := service.AdminList(context.Background(), nil, 10, 0)
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("listed reports = %d, %v", len(listed), err)
+	}
+	service.objects = failingObjectDelete{objects}
+	if err := service.AdminDelete(context.Background(), listed[0].ID); err == nil {
+		t.Fatal("admin delete hid the object deletion failure")
+	}
+	service.objects = objects
+	orphans := []string{strings.Repeat("0f", 32) + ".enc", strings.Repeat("f0", 32) + ".enc"}
+	for _, key := range orphans {
+		objects.Values[key] = []byte("sealed for a purged report")
+	}
+
+	inventory, err := service.InventoryDiagnostics(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inventory != (DiagnosticInventory{Attached: 1, Orphaned: 2}) {
+		t.Fatalf("inventory = %#v, want 1 attached and 2 orphaned (the revoked report's object is still referenced)", inventory)
+	}
+	if len(objects.Values) != 4 {
+		t.Fatalf("private object count after inventory = %d, want 4", len(objects.Values))
+	}
+}

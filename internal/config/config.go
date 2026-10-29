@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -22,6 +23,9 @@ type Config struct {
 	AdminUsername     string
 	AdminPasswordHash string
 	SecureCookies     bool
+	// StorageAdopt rebinds the database to the mounted object volume's storage
+	// ID. It is a recovery-only override.
+	StorageAdopt bool
 }
 
 func FromEnvironment() (Config, error) {
@@ -67,6 +71,13 @@ func FromEnvironment() (Config, error) {
 	config.SecureCookies = parsed.Scheme == "https"
 	if config.DatabaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")
+	}
+	if raw := strings.TrimSpace(os.Getenv("SUPPORT_STORAGE_ADOPT")); raw != "" {
+		adopt, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, errors.New("SUPPORT_STORAGE_ADOPT must be 1, true, 0, or false")
+		}
+		config.StorageAdopt = adopt
 	}
 	if config.DataKey == "" {
 		return Config{}, errors.New("SUPPORT_DATA_KEY is required")

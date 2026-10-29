@@ -20,7 +20,6 @@ ENV SUPPORT_PUBLIC_URL=https://support.obiente.org \
 COPY --from=build /out/support /support
 COPY --from=frontend /src/frontend/dist ./frontend/dist
 COPY --chown=65532:65532 --from=build /out/private ./data/private
-VOLUME ["/data"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["/support", "healthcheck"]
 USER nonroot:nonroot

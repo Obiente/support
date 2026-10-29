@@ -17,6 +17,9 @@ type Objects interface {
 	Put(key, reportID string, plaintext []byte) error
 	Get(key, reportID string) ([]byte, error)
 	Delete(key string) error
+	// Keys lists stored object keys. Temporary uploads, the storage marker,
+	// and other files that do not match the object key format are ignored.
+	Keys() ([]string, error)
 }
 
 type FileObjects struct {
@@ -120,6 +123,20 @@ func (objects *FileObjects) Delete(key string) error {
 	return err
 }
 
+func (objects *FileObjects) Keys() ([]string, error) {
+	entries, err := os.ReadDir(objects.root)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Type().IsRegular() && objectKeyPattern.MatchString(entry.Name()) {
+			keys = append(keys, entry.Name())
+		}
+	}
+	return keys, nil
+}
+
 type MemoryObjects struct {
 	Values map[string][]byte
 }
@@ -161,4 +178,12 @@ func (objects *FileObjects) Exists(key string) (bool, error) {
 func (objects *MemoryObjects) Exists(key string) (bool, error) {
 	_, exists := objects.Values[key]
 	return exists, nil
+}
+
+func (objects *MemoryObjects) Keys() ([]string, error) {
+	keys := make([]string, 0, len(objects.Values))
+	for key := range objects.Values {
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
