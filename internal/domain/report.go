@@ -9,6 +9,19 @@ const (
 	MaxMessageBytes           = 8 * 1024
 )
 
+// ReceiptLinkRetention is how long contract version 1 clients are told to keep
+// their local copy of a private report link. It is not a server deletion date:
+// reports are kept until the reporter or a maintainer deletes them. Released
+// clients require a timestamp in this window, so the value stays in every
+// contract version 1 response for wire compatibility.
+const ReceiptLinkRetention = 30 * 24 * time.Hour
+
+// ReceiptLinkRetentionUntil returns the compatibility value reported to
+// contract version 1 clients as retentionUntil.
+func ReceiptLinkRetentionUntil(createdAt time.Time) time.Time {
+	return createdAt.Add(ReceiptLinkRetention)
+}
+
 func (value ReportStatus) Valid() bool {
 	return value == StatusNew || value == StatusNeedsInformation || value == StatusAccepted ||
 		value == StatusDuplicate || value == StatusResolved || value == StatusRejected
@@ -79,8 +92,16 @@ type Report struct {
 	CapabilityHash       []byte
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
-	RetentionUntil       time.Time
-	DeletedAt            *time.Time
+	// RetentionUntil mirrors the nullable retention_until column. New reports
+	// store NULL and nothing deletes a report because of its age.
+	RetentionUntil *time.Time
+	DeletedAt      *time.Time
+}
+
+// DiagnosticReference identifies the private object attached to a live report.
+type DiagnosticReference struct {
+	ReportID  string
+	ObjectKey string
 }
 
 type Receipt struct {

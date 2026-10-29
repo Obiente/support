@@ -14,7 +14,6 @@ type Product struct {
 	DiagnosticEntries      []string `json:"diagnosticEntries"`
 	DiagnosticMaxBytes     int64    `json:"diagnosticMaxBytes"`
 	DiagnosticMaxExpanded  int64    `json:"diagnosticMaxExpandedBytes"`
-	RetentionDays          int      `json:"retentionDays"`
 }
 
 type Registry struct {
@@ -24,7 +23,7 @@ type Registry struct {
 func New(values []Product) (*Registry, error) {
 	registry := &Registry{products: make(map[string]Product, len(values))}
 	for _, product := range values {
-		if product.ID == "" || product.Name == "" || product.RetentionDays < 1 {
+		if product.ID == "" || product.Name == "" {
 			return nil, errors.New("invalid product registration")
 		}
 		if _, exists := registry.products[product.ID]; exists {
@@ -49,7 +48,6 @@ func Default() *Registry {
 			DiagnosticEntries:      []string{"README.txt", "report.json", "events.jsonl", "manifest.json"},
 			DiagnosticMaxBytes:     4 * 1024 * 1024,
 			DiagnosticMaxExpanded:  8 * 1024 * 1024,
-			RetentionDays:          30,
 		},
 		{
 			ID:                     "obiente-general",
@@ -59,7 +57,6 @@ func Default() *Registry {
 			DiagnosticEntries:      []string{},
 			DiagnosticMaxBytes:     0,
 			DiagnosticMaxExpanded:  0,
-			RetentionDays:          30,
 		},
 	})
 	if err != nil {

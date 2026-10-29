@@ -2,7 +2,7 @@
 
 Obiente Support is the product-neutral support portal and private intake service for Obiente projects. It lets people report bugs, suggest features, ask for help, and send explicitly approved diagnostics without needing a GitHub account.
 
-The public portal is a Vue 3 and TypeScript application. A small Go service owns the versioned intake contract, private storage, idempotency, status capabilities, deletion, and retention.
+The public portal is a Vue 3 and TypeScript application. A small Go service owns the versioned intake contract, private storage, idempotency, status capabilities, and deletion.
 
 ## What this foundation includes
 
@@ -13,11 +13,11 @@ The public portal is a Vue 3 and TypeScript application. A small Go service owns
 - Atomic cancellation tombstones that prevent a delayed upload from recreating a cancelled private report.
 - Human-readable support codes and unguessable private status/deletion links.
 - Application-level AES-256-GCM encryption for private report fields, capabilities, and diagnostic objects.
-- Automatic private-data expiration and immediate deletion through the private capability.
+- Reports, conversations, and diagnostic attachments kept until deleted, with immediate deletion through the private capability or by a maintainer.
 - A second product registration and synthetic contract fixtures to prevent product-specific service code.
 - A responsive, keyboard-operable Vue portal with reduced-motion behavior and upload cancellation.
 - Direct diagnostic submission from supported applications, with the web ZIP picker as a fallback.
-- A private maintainer login, report queue, decrypted detail view, diagnostic download, and status moderation.
+- A private maintainer login, report queue, decrypted detail view, diagnostic download, status moderation, and report deletion.
 - Server-side 12-hour admin sessions, strict cookies, CSRF protection, login throttling, and access auditing.
 
 Public tracker promotion, GitHub synchronization, and safe follow-up messages remain required before the complete support workflow is finished.
@@ -65,7 +65,7 @@ For the production single-container build:
 docker compose up --build
 ```
 
-The image and Compose service default to `SUPPORT_PUBLIC_URL=https://support.obiente.org` and `SUPPORT_ENVIRONMENT=production`. The development `.env` created above overrides those values, so do not reuse it for a production deployment. Production refuses to start when its public URL is missing or is not a plain HTTPS origin. The support image contains both the built Vue portal and Go service. Mount persistent encrypted report storage at `/data`; the service stores diagnostic objects under `/data/private`.
+The image and Compose service default to `SUPPORT_PUBLIC_URL=https://support.obiente.org` and `SUPPORT_ENVIRONMENT=production`. The development `.env` created above overrides those values, so do not reuse it for a production deployment. Production refuses to start when its public URL is missing or is not a plain HTTPS origin. The support image contains both the built Vue portal and Go service. Mount persistent encrypted report storage at `/data`; the service stores diagnostic objects under `/data/private` and refuses to start when that directory is not writable. Reattach the same volume on every redeploy, because the service keeps reports until they are deleted.
 
 The public intake is at `/`. Maintainers sign in at `/admin/login`. Admin credentials are runtime configuration; no default password is included in the image.
 
@@ -84,6 +84,7 @@ npm run build
 ## Privacy boundaries
 
 - New reports are private. Nothing is published automatically.
+- Reports, their conversations, and their diagnostic attachments are kept until the reporter deletes them through the private link or a maintainer deletes them. Nothing is deleted because of its age.
 - Diagnostic attachments are optional and must match the selected product's registered schema.
 - The service does not store raw idempotency keys or raw status capabilities in database lookup columns.
 - Cancellation retains only the one-way idempotency hash needed to reject a delayed submission; it does not retain report content.
@@ -92,7 +93,7 @@ npm run build
 - Private status URLs are bearer capabilities. Applications must never put them in diagnostics, telemetry, or public issues.
 - The application does not submit diagnostics automatically, after a crash, or in the background.
 - Server logs contain operational failures but no request body, capability path, contact data, diagnostic content, or remote address.
-- Maintainer access uses a server-side session and every list, view, diagnostic download, status change, login, and logout is written to the database audit trail.
+- Maintainer access uses a server-side session and every list, view, diagnostic download, status change, message, deletion, login, and logout is written to the database audit trail.
 
 See [docs/threat-model.md](docs/threat-model.md), [docs/operations.md](docs/operations.md), and [openapi.yaml](openapi.yaml) for the initial security and integration contract.
 
@@ -105,7 +106,9 @@ GNU Affero General Public License v3.0. See [LICENSE](LICENSE).
 Admin responses retain `hasDiagnostics` as evidence that an archive was attached.
 The additive `diagnosticsState` field reports `none`, `available`, `unavailable`,
 or `unknown` after checking private object storage. Missing objects do not delete
-report metadata or change report status. Downloads of a missing attached object
+report metadata or change report status. At startup the service logs a warning
+that names the object root and counts live reports whose diagnostic object is
+missing. Downloads of a missing attached object
 return `503 diagnostics_unavailable`; an unknown report still returns 404.
 
 Production deployments must reuse the same persistent `/data` volume on every
@@ -113,4 +116,5 @@ redeploy, together with the database and encryption key. The Dockerfile volume
 declaration alone does not ensure that a deployment platform reattaches the same
 volume. Back up encrypted objects, database records, and the separately protected
 key together. Restore missing objects from a verified backup; do not mark their
-reports resolved merely because metadata remains readable.
+reports resolved merely because metadata remains readable. See
+[docs/operations.md](docs/operations.md#restoring-missing-diagnostic-objects).

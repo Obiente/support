@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -77,7 +78,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	objects, err := store.NewFileObjects(configuration.ObjectRoot, box)
+	objects, err := openPrivateObjects(configuration.ObjectRoot, box)
 	if err != nil {
 		return err
 	}
@@ -94,12 +95,15 @@ func run(logger *slog.Logger) error {
 	registry := products.Default()
 	intakeService := intake.New(reports, objects, registry, box, configuration.PublicURL)
 	adminService := admin.New(reports, configuration.AdminUsername, configuration.AdminPasswordHash)
-	if err := intakeService.PurgeExpired(startupContext, 250); err != nil {
-		logger.Warn("initial private-data retention purge did not complete", "error", err)
+	inventoryContext, inventoryCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	reportDiagnosticInventory(inventoryContext, logger, configuration.ObjectRoot, intakeService)
+	inventoryCancel()
+	if err := intakeService.PurgeDeleted(startupContext, 250); err != nil {
+		logger.Warn("initial deleted-report purge did not complete", "error", err)
 	}
-	retentionContext, retentionCancel := context.WithCancel(context.Background())
-	defer retentionCancel()
-	go runRetention(retentionContext, intakeService, logger)
+	purgeContext, purgeCancel := context.WithCancel(context.Background())
+	defer purgeCancel()
+	go runDeletionPurge(purgeContext, intakeService, logger)
 	webServer, err := web.New(intakeService, adminService, registry, logger, configuration.WebRoot, configuration.SecureCookies)
 	if err != nil {
 		return err
@@ -125,7 +129,44 @@ func run(logger *slog.Logger) error {
 	}
 }
 
-func runRetention(ctx context.Context, intakeService *intake.Service, logger *slog.Logger) {
+// openPrivateObjects opens the private object root and refuses to continue
+// unless a probe file can be created and removed there.
+func openPrivateObjects(root string, box *cryptobox.Box) (*store.FileObjects, error) {
+	objects, err := store.NewFileObjects(root, box)
+	if err == nil {
+		err = store.VerifyObjectRoot(root)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("refusing to start without writable persistent private storage: %w", err)
+	}
+	return objects, nil
+}
+
+// reportDiagnosticInventory logs how many live reports reference a diagnostic
+// object that is missing from the private object root. A count above zero
+// usually means the persistent volume was not reattached. It never changes or
+// deletes a report.
+func reportDiagnosticInventory(ctx context.Context, logger *slog.Logger, objectRoot string, intakeService *intake.Service) {
+	inventory, err := intakeService.InventoryDiagnostics(ctx)
+	if err != nil {
+		logger.Warn("private diagnostic object inventory did not complete",
+			"object_root", objectRoot, "attached", inventory.Attached, "missing", inventory.Missing,
+			"unknown", inventory.Unknown, "error", err)
+		return
+	}
+	if inventory.Missing > 0 || inventory.Unknown > 0 {
+		logger.Warn("reports reference unavailable private diagnostic objects; restore the persistent volume or its backup",
+			"object_root", objectRoot, "attached", inventory.Attached, "missing", inventory.Missing,
+			"unknown", inventory.Unknown)
+		return
+	}
+	logger.Info("private diagnostic objects verified",
+		"object_root", objectRoot, "attached", inventory.Attached, "missing", 0)
+}
+
+// runDeletionPurge completes reporter, cancellation, and maintainer deletions.
+// Reports are never purged because of their age.
+func runDeletionPurge(ctx context.Context, intakeService *intake.Service, logger *slog.Logger) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	for {
@@ -134,8 +175,8 @@ func runRetention(ctx context.Context, intakeService *intake.Service, logger *sl
 			return
 		case <-ticker.C:
 			purgeContext, cancel := context.WithTimeout(ctx, 5*time.Minute)
-			if err := intakeService.PurgeExpired(purgeContext, 250); err != nil {
-				logger.Warn("private-data retention purge did not complete", "error", err)
+			if err := intakeService.PurgeDeleted(purgeContext, 250); err != nil {
+				logger.Warn("deleted-report purge did not complete", "error", err)
 			}
 			cancel()
 		}

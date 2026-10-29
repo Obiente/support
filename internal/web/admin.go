@@ -208,6 +208,25 @@ func (server *Server) adminUpdateReport(response http.ResponseWriter, request *h
 	writeJSON(response, http.StatusOK, report)
 }
 
+func (server *Server) adminDeleteReport(response http.ResponseWriter, request *http.Request) {
+	_, session, ok := server.requireAdminCSRF(response, request)
+	if !ok {
+		return
+	}
+	id, ok := adminReportID(response, request)
+	if !ok {
+		return
+	}
+	if !server.auditAdmin(response, request, session.Username, "report_deletion_requested", &id) {
+		return
+	}
+	if err := server.intake.AdminDelete(request.Context(), id); err != nil {
+		server.writeAdminError(response, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func (server *Server) adminReportMessage(response http.ResponseWriter, request *http.Request) {
 	_, session, ok := server.requireAdminCSRF(response, request)
 	if !ok {

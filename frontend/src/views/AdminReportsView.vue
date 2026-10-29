@@ -5,6 +5,7 @@ import type { AdminReportDetail, AdminReportSummary, AdminSession } from '../sup
 import {
   adminDiagnosticsURL,
   adminLogout,
+  deleteAdminReport,
   loadAdminReport,
   loadAdminReports,
   loadAdminSession,
@@ -86,6 +87,24 @@ async function askReporter() {
   }
 }
 
+async function deleteReport() {
+  if (!selected.value) return
+  const report = selected.value
+  if (!window.confirm(`Permanently delete ${report.supportCode}, its private conversation, and its diagnostic ZIP? The reporter's private link will stop working. This cannot be undone.`)) return
+  saving.value = true
+  message.value = ''
+  try {
+    await deleteAdminReport(report.id)
+    if (selected.value?.id === report.id) selected.value = undefined
+    await refreshReports()
+    message.value = `${report.supportCode} was deleted.`
+  } catch (error) {
+    await handleError(error)
+  } finally {
+    saving.value = false
+  }
+}
+
 async function signOut() {
   try {
     await adminLogout()
@@ -153,7 +172,7 @@ function readable(value: string): string {
               <div><dt>Source</dt><dd>{{ selected.source }}</dd></div>
               <div><dt>Release</dt><dd>{{ selected.release.version || 'Not provided' }} · {{ selected.release.platform }}</dd></div>
               <div><dt>Submitted</dt><dd>{{ formatDate(selected.createdAt, true) }}</dd></div>
-              <div><dt>Expires</dt><dd>{{ formatDate(selected.retentionUntil) }}</dd></div>
+              <div><dt>Retention</dt><dd>Kept until deleted</dd></div>
             </dl>
             <div class="private-copy"><h3>Description</h3><p>{{ selected.description }}</p></div>
             <div v-if="selected.contact" class="private-copy"><h3>Private contact</h3><p>{{ selected.contact }}</p></div>
@@ -173,6 +192,10 @@ function readable(value: string): string {
             <p v-if="selected.diagnosticsState === 'unavailable'" role="status">The report is retained, but its diagnostic ZIP is unavailable. Check the private archive storage or request a new diagnostic report.</p>
             <p v-else-if="selected.diagnosticsState === 'unknown'" role="status">Diagnostic storage could not be checked. Reload this report after storage is available.</p>
             <p class="private-warning">Private report data must not be copied into a public issue without reviewing and removing personal information.</p>
+            <div class="report-delete">
+              <p>Delete this report once it is no longer needed. Its conversation and diagnostic ZIP are removed with it.</p>
+              <button class="danger" type="button" :disabled="saving" @click="deleteReport">Delete report</button>
+            </div>
           </template>
           <p v-else>Select a report to review its private details.</p>
         </section>

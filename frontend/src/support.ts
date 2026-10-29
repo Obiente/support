@@ -9,7 +9,6 @@ export interface Product {
   diagnosticEntries: string[]
   diagnosticMaxBytes: number
   diagnosticMaxExpandedBytes: number
-  retentionDays: number
 }
 
 export interface ProductResponse {
@@ -42,6 +41,7 @@ export interface Receipt {
   statusUrl: string
   deletionUrl: string
   createdAt: string
+  /** Legacy contract v1 field: createdAt + 30 days. Not a deletion date; reports are kept until deleted. */
   retentionUntil: string
 }
 
@@ -53,6 +53,7 @@ export interface PrivateStatus {
   status: string
   createdAt: string
   updatedAt: string
+  /** Legacy contract v1 field: createdAt + 30 days. Not a deletion date; reports are kept until deleted. */
   retentionUntil: string
   messages: SupportMessage[]
 }
@@ -83,6 +84,7 @@ export interface AdminReportSummary {
   diagnosticsState?: 'none' | 'available' | 'unavailable' | 'unknown'
   createdAt: string
   updatedAt: string
+  /** Legacy contract v1 field: createdAt + 30 days. Not a deletion date; reports are kept until deleted. */
   retentionUntil: string
 }
 
@@ -251,6 +253,13 @@ export async function sendAdminMessage(id: string, body: string): Promise<AdminR
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': adminCSRFToken },
     body: JSON.stringify({ body }),
   })
+}
+
+export async function deleteAdminReport(id: string): Promise<void> {
+  await adminJSON(`/api/v1/admin/reports/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { 'X-CSRF-Token': adminCSRFToken },
+  }, true)
 }
 
 export function adminDiagnosticsURL(id: string): string {

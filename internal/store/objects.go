@@ -34,6 +34,35 @@ func NewFileObjects(root string, box *cryptobox.Box) (*FileObjects, error) {
 	return &FileObjects{root: root, box: box}, nil
 }
 
+// VerifyObjectRoot proves that the private object root is an existing, writable
+// directory by creating, syncing, and removing a probe file. It never touches
+// stored diagnostic objects.
+func VerifyObjectRoot(root string) error {
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("private object root %s is unavailable: %w", root, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("private object root %s is not a directory", root)
+	}
+	probe, err := os.CreateTemp(root, ".write-probe-*.tmp")
+	if err != nil {
+		return fmt.Errorf("private object root %s is not writable: %w", root, err)
+	}
+	probeName := probe.Name()
+	_, writeErr := probe.Write([]byte("probe"))
+	syncErr := probe.Sync()
+	closeErr := probe.Close()
+	removeErr := os.Remove(probeName)
+	if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
+		return fmt.Errorf("private object root %s is not writable: %w", root, err)
+	}
+	if removeErr != nil {
+		return fmt.Errorf("private object root %s does not allow probe removal: %w", root, removeErr)
+	}
+	return nil
+}
+
 func (objects *FileObjects) Put(key, reportID string, plaintext []byte) error {
 	if !objectKeyPattern.MatchString(key) {
 		return errors.New("invalid private object key")
