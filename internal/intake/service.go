@@ -117,7 +117,6 @@ func (service *Service) Submit(ctx context.Context, submission Submission) (doma
 			PrivatePayload: sealedPayload, CapabilityCiphertext: sealedCapability,
 			IdempotencyHash: idempotencyHash, RequestHash: requestHash,
 			CapabilityHash: hash([]byte(capability)), CreatedAt: now, UpdatedAt: now,
-			RetentionUntil: now.Add(time.Duration(product.RetentionDays) * 24 * time.Hour),
 		}
 		if len(submission.Archive) > 0 {
 			objectKeyBytes := make([]byte, 32)
@@ -237,22 +236,47 @@ func (service *Service) Delete(ctx context.Context, capability string) (domain.P
 	if err != nil {
 		return domain.PrivateStatus{}, err
 	}
-	if report.DiagnosticObjectKey != nil {
-		if err := service.objects.Delete(*report.DiagnosticObjectKey); err != nil {
-			return domain.PrivateStatus{}, fmt.Errorf("delete private diagnostic object: %w", err)
-		}
+	if err := service.removeDiagnostics(report); err != nil {
+		return domain.PrivateStatus{}, err
 	}
 	status := privateStatus(report, []domain.Message{})
 	status.Status = "deleted"
 	return status, nil
 }
 
-func (service *Service) PurgeExpired(ctx context.Context, limit int) error {
-	if limit < 1 || limit > 1000 {
-		return errors.New("invalid retention purge limit")
+// AdminDelete revokes a report that a maintainer no longer needs and removes its
+// diagnostic object. It follows the same path as reporter deletion: the row is
+// soft-deleted first, so a failed object removal is retried by PurgeDeleted.
+func (service *Service) AdminDelete(ctx context.Context, id string) error {
+	report, err := service.reports.AdminDelete(ctx, id, service.now())
+	if errors.Is(err, store.ErrNotFound) {
+		return ErrNotFound
 	}
-	now := service.now()
-	reports, err := service.reports.Expired(ctx, now, limit)
+	if err != nil {
+		return err
+	}
+	return service.removeDiagnostics(report)
+}
+
+func (service *Service) removeDiagnostics(report domain.Report) error {
+	if report.DiagnosticObjectKey == nil {
+		return nil
+	}
+	if err := service.objects.Delete(*report.DiagnosticObjectKey); err != nil {
+		return fmt.Errorf("delete private diagnostic object: %w", err)
+	}
+	return nil
+}
+
+// PurgeDeleted completes deletions that a reporter, a cancellation, or a
+// maintainer already requested. It never selects a report because of its age.
+// A report row is kept whenever its diagnostic object cannot be removed so the
+// object reference remains available for a later retry.
+func (service *Service) PurgeDeleted(ctx context.Context, limit int) error {
+	if limit < 1 || limit > 1000 {
+		return errors.New("invalid deletion purge limit")
+	}
+	reports, err := service.reports.Deleted(ctx, limit)
 	if err != nil {
 		return err
 	}
@@ -264,7 +288,7 @@ func (service *Service) PurgeExpired(ctx context.Context, limit int) error {
 				continue
 			}
 		}
-		if err := service.reports.Purge(ctx, report.ID, now); err != nil && !errors.Is(err, store.ErrNotFound) {
+		if err := service.reports.PurgeDeleted(ctx, report.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
 			purgeErrors = append(purgeErrors, fmt.Errorf("purge report %s: %w", report.ID, err))
 		}
 	}
@@ -427,7 +451,8 @@ func (service *Service) adminSummary(report domain.Report, payload domain.Privat
 		RequestType: report.RequestType, Status: report.Status, Source: payload.Source,
 		Title: payload.Title, HasDiagnostics: report.DiagnosticObjectKey != nil,
 		DiagnosticsState: service.diagnosticsState(report),
-		CreatedAt:        report.CreatedAt, UpdatedAt: report.UpdatedAt, RetentionUntil: report.RetentionUntil,
+		CreatedAt:        report.CreatedAt, UpdatedAt: report.UpdatedAt,
+		RetentionUntil: domain.ReceiptLinkRetentionUntil(report.CreatedAt),
 	}
 }
 
@@ -447,7 +472,7 @@ func (service *Service) receipt(report domain.Report) (domain.Receipt, error) {
 	return domain.Receipt{
 		ContractVersion: domain.ContractVersion, SupportCode: report.SupportCode,
 		Status: string(report.Status), StatusURL: statusURL, DeletionURL: statusURL,
-		CreatedAt: report.CreatedAt, RetentionUntil: report.RetentionUntil,
+		CreatedAt: report.CreatedAt, RetentionUntil: domain.ReceiptLinkRetentionUntil(report.CreatedAt),
 	}, nil
 }
 
@@ -559,7 +584,7 @@ func privateStatus(report domain.Report, messages []domain.Message) domain.Priva
 		ContractVersion: domain.ContractVersion, SupportCode: report.SupportCode,
 		ProductID: report.ProductID, RequestType: string(report.RequestType),
 		Status: string(report.Status), CreatedAt: report.CreatedAt, UpdatedAt: report.UpdatedAt,
-		RetentionUntil: report.RetentionUntil, Messages: messages,
+		RetentionUntil: domain.ReceiptLinkRetentionUntil(report.CreatedAt), Messages: messages,
 	}
 }
 
@@ -625,4 +650,43 @@ func (service *Service) diagnosticsState(report domain.Report) string {
 		return "unavailable"
 	}
 	return "available"
+}
+
+// DiagnosticInventory summarizes the private objects referenced by live reports.
+type DiagnosticInventory struct {
+	Attached int
+	Missing  int
+	Unknown  int
+}
+
+// InventoryDiagnostics checks every live report with an attached diagnostic
+// object. It only reads object metadata and never changes or deletes a report,
+// so a lost or detached volume becomes visible without losing report records.
+func (service *Service) InventoryDiagnostics(ctx context.Context) (DiagnosticInventory, error) {
+	const pageSize = 500
+	var inventory DiagnosticInventory
+	cursor := store.FirstReportID
+	for {
+		references, err := service.reports.DiagnosticReferences(ctx, cursor, pageSize)
+		if err != nil {
+			return inventory, err
+		}
+		for _, reference := range references {
+			inventory.Attached++
+			exists, err := service.objects.Exists(reference.ObjectKey)
+			switch {
+			case err != nil:
+				inventory.Unknown++
+			case !exists:
+				inventory.Missing++
+			}
+		}
+		if len(references) < pageSize {
+			return inventory, nil
+		}
+		cursor = references[len(references)-1].ReportID
+		if err := ctx.Err(); err != nil {
+			return inventory, err
+		}
+	}
 }

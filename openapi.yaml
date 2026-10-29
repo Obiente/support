@@ -2,7 +2,11 @@ openapi: 3.1.0
 info:
   title: Obiente Support Intake API
   version: 1.0.0
-  description: Product-neutral private support intake. All successful report submissions require explicit user confirmation in the calling client.
+  description: >-
+    Product-neutral private support intake. All successful report submissions require explicit
+    user confirmation in the calling client. Reports, their conversations, and their diagnostic
+    archives are kept until the reporter deletes them through the private capability or a
+    maintainer deletes them; the service never deletes a report because of its age.
   license:
     name: GNU Affero General Public License v3.0
     identifier: AGPL-3.0-only
@@ -97,6 +101,7 @@ paths:
     delete:
       summary: Delete a private report through its capability
       operationId: deletePrivateReport
+      description: Revokes the capability immediately and removes the diagnostic object. The revoked row is then hard-deleted by the deletion purge task.
       responses:
         "200":
           description: The private report was revoked and its diagnostic object removed.
@@ -237,6 +242,24 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+    delete:
+      summary: Delete a private report that is no longer needed
+      operationId: deleteAdminReport
+      description: >-
+        Soft-deletes the report, which immediately revokes the reporter's private capability, and
+        removes its diagnostic object. The request is recorded in the admin audit trail before the
+        deletion runs. The revoked row and its conversation are hard-deleted by the deletion purge
+        task. If the diagnostic object cannot be removed, the response is 500, the report stays
+        revoked, and the purge task retries the object removal before deleting the row.
+      security: [{ AdminSessionCookie: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CSRFToken"
+      responses:
+        "204": { description: The report was deleted and its diagnostic object removed. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
   /api/v1/admin/reports/{id}/diagnostics:
     get:
       summary: Download one private diagnostic archive
@@ -325,7 +348,7 @@ components:
           items: { $ref: "#/components/schemas/Product" }
     Product:
       type: object
-      required: [id, name, description, diagnosticContentTypes, diagnosticEntries, diagnosticMaxBytes, diagnosticMaxExpandedBytes, retentionDays]
+      required: [id, name, description, diagnosticContentTypes, diagnosticEntries, diagnosticMaxBytes, diagnosticMaxExpandedBytes]
       properties:
         id: { type: string }
         name: { type: string }
@@ -335,7 +358,6 @@ components:
         diagnosticEntries: { type: array, items: { type: string } }
         diagnosticMaxBytes: { type: integer, minimum: 0 }
         diagnosticMaxExpandedBytes: { type: integer, minimum: 0 }
-        retentionDays: { type: integer, minimum: 1 }
     ReportMetadata:
       type: object
       required: [contractVersion, productId, requestType, title, description, source, release, privacyAccepted]
@@ -367,7 +389,7 @@ components:
         statusUrl: { type: string, format: uri }
         deletionUrl: { type: string, format: uri }
         createdAt: { type: string, format: date-time }
-        retentionUntil: { type: string, format: date-time }
+        retentionUntil: { $ref: "#/components/schemas/LegacyRetentionUntil" }
     PrivateStatus:
       type: object
       required: [contractVersion, supportCode, productId, requestType, status, createdAt, updatedAt, retentionUntil, messages]
@@ -379,10 +401,20 @@ components:
         status: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
-        retentionUntil: { type: string, format: date-time }
+        retentionUntil: { $ref: "#/components/schemas/LegacyRetentionUntil" }
         messages:
           type: array
           items: { $ref: "#/components/schemas/SupportMessage" }
+    LegacyRetentionUntil:
+      type: string
+      format: date-time
+      deprecated: true
+      description: >-
+        Legacy contract version 1 field. It is always createdAt plus 30 days and is never null,
+        because released clients require a timestamp within 30 days of createdAt. It is
+        informational only and is not a deletion date: the service keeps reports until the
+        reporter or a maintainer deletes them, and nothing is purged when this time passes.
+        Clients may use it only as a hint for how long to keep their local copy of the private link.
     MessageInput:
       type: object
       required: [body]
@@ -425,7 +457,7 @@ components:
           description: Current private object storage availability; unknown means the storage check failed.
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
-        retentionUntil: { type: string, format: date-time }
+        retentionUntil: { $ref: "#/components/schemas/LegacyRetentionUntil" }
     AdminReportDetail:
       allOf:
         - $ref: "#/components/schemas/AdminReportSummary"

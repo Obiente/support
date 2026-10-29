@@ -4,8 +4,8 @@ import "testing"
 
 func TestRegistryOnboardsSyntheticProductWithoutCodeChanges(t *testing.T) {
 	registry, err := New([]Product{
-		{ID: "synthetic-product", Name: "Synthetic product", RetentionDays: 7, DiagnosticEntries: []string{"diagnostic.txt"}},
-		{ID: "another-product", Name: "Another product", RetentionDays: 14},
+		{ID: "synthetic-product", Name: "Synthetic product", DiagnosticEntries: []string{"diagnostic.txt"}},
+		{ID: "another-product", Name: "Another product"},
 	})
 	if err != nil {
 		t.Fatal(err)

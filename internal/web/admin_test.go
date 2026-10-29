@@ -102,14 +102,29 @@ func TestAdminSessionProtectsReviewAndDiagnosticRoutes(t *testing.T) {
 	}
 }
 
+type adminFixture struct {
+	handler    http.Handler
+	reportID   string
+	capability string
+	reports    *store.Memory
+	objects    *store.MemoryObjects
+	intake     *intake.Service
+}
+
 func testAdminHandler(t *testing.T) (http.Handler, string, string) {
+	t.Helper()
+	fixture := newAdminFixture(t)
+	return fixture.handler, fixture.reportID, fixture.capability
+}
+
+func newAdminFixture(t *testing.T) adminFixture {
 	t.Helper()
 	box, err := cryptobox.NewFromBase64(base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	registry, err := products.New([]products.Product{{
-		ID: "synthetic-product", Name: "Synthetic product", RetentionDays: 7,
+		ID: "synthetic-product", Name: "Synthetic product",
 		DiagnosticContentTypes: []string{"application/zip"}, DiagnosticEntries: []string{"diagnostic.txt"},
 		DiagnosticMaxBytes: 4096, DiagnosticMaxExpanded: 2048,
 	}})
@@ -148,7 +163,10 @@ func testAdminHandler(t *testing.T) (http.Handler, string, string) {
 		t.Fatal(err)
 	}
 	capability := receipt.StatusURL[strings.LastIndex(receipt.StatusURL, "/")+1:]
-	return server.Handler(), listed[0].ID, capability
+	return adminFixture{
+		handler: server.Handler(), reportID: listed[0].ID, capability: capability,
+		reports: reports, objects: objects, intake: intakeService,
+	}
 }
 
 func testDiagnosticArchive(t *testing.T) []byte {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { adminLogin, deleteReceipt, loadProducts, randomIdempotencyKey, reconcileReceipt, sendAdminMessage, sendPrivateMessage, updateAdminReportStatus } from './support'
+import { adminLogin, deleteAdminReport, deleteReceipt, loadProducts, randomIdempotencyKey, reconcileReceipt, sendAdminMessage, sendPrivateMessage, updateAdminReportStatus } from './support'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -15,7 +15,7 @@ describe('support contract client', () => {
       products: [{
         id: 'synthetic-product', name: 'Synthetic product', description: 'Fixture',
         diagnosticContentTypes: [], diagnosticEntries: [], diagnosticMaxBytes: 0,
-        diagnosticMaxExpandedBytes: 0, retentionDays: 7,
+        diagnosticMaxExpandedBytes: 0,
       }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
 
@@ -98,6 +98,24 @@ describe('support contract client', () => {
       credentials: 'same-origin',
       method: 'PATCH',
       headers: expect.objectContaining({ 'X-CSRF-Token': 'A'.repeat(43) }),
+    }))
+  })
+
+  it('deletes an admin report with the session CSRF token', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        contractVersion: 1, username: 'maintainer', csrfToken: 'B'.repeat(43), expiresAt: '2026-08-14T00:00:00Z',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetch)
+
+    await adminLogin('maintainer', 'secret')
+    await expect(deleteAdminReport('11111111-1111-4111-8111-111111111111')).resolves.toBeUndefined()
+
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/admin/reports/11111111-1111-4111-8111-111111111111', expect.objectContaining({
+      credentials: 'same-origin',
+      method: 'DELETE',
+      headers: expect.objectContaining({ 'X-CSRF-Token': 'B'.repeat(43) }),
     }))
   })
 

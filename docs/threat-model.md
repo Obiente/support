@@ -46,7 +46,13 @@ Infrastructure still needs encrypted PostgreSQL and volume storage, protected ba
 
 ### Retention and deletion
 
-Each product defines a private-data retention period. Expired and user-deleted records are purged hourly. Diagnostic object deletion must succeed before database hard deletion so an orphaned encrypted object remains discoverable for a later retry. Deleting a live report immediately revokes its capability.
+Reports, their conversations, and their diagnostic objects are kept until the reporter deletes them through the private capability or a maintainer deletes them through the authenticated, CSRF-protected, and audited admin action. Nothing is deleted because of its age. The longer retention increases the value of the database, the object volume, and their backups, so host encryption, backup encryption, and operator access control remain required.
+
+Deleting a live report immediately revokes its capability and removes its diagnostic object. An hourly task hard-deletes revoked rows. Diagnostic object deletion must succeed before database hard deletion so an orphaned encrypted object remains discoverable for a later retry.
+
+A missing diagnostic object never deletes or changes a report. Startup refuses to continue when the object root is not writable and logs the number of live reports whose diagnostic object is missing, so a detached or replaced volume is visible instead of silently losing attachments.
+
+Contract version 1 responses still contain `retentionUntil`, always `createdAt` plus 30 days, because released clients require it. It is informational only and is not a deletion date.
 
 ### Browser attacks
 
@@ -56,7 +62,7 @@ The service sends a restrictive Content Security Policy, denies framing, disable
 
 The service accepts one configured username and bcrypt password hash. Successful authentication creates a random 256-bit server-side session with a 12-hour expiry. Its cookie is HTTP-only, SameSite-strict, and secure when the canonical origin uses HTTPS. Mutating admin requests require a separate rotating 256-bit CSRF token. Failed logins are throttled per directly observed network address.
 
-List, detail, diagnostic download, status change, login, and logout actions are recorded in PostgreSQL. The audit trail stores a keyed hash of the observed network address rather than the address itself. Private payloads and diagnostics are decrypted only after session validation. The console does not create public issues or publish private fields.
+List, detail, diagnostic download, status change, message, deletion, login, and logout actions are recorded in PostgreSQL. State changes are audited before they run and fail closed when the audit record cannot be written. The audit trail stores a keyed hash of the observed network address rather than the address itself. Private payloads and diagnostics are decrypted only after session validation. The console does not create public issues or publish private fields.
 
 ## Known incomplete controls
 

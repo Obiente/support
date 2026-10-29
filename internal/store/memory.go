@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ type Memory struct {
 	cancellations map[string]time.Time
 	sessions      []domain.AdminSession
 	messages      []domain.Message
+	audits        []domain.AdminAudit
 }
 
 func NewMemory() *Memory { return &Memory{cancellations: make(map[string]time.Time)} }
@@ -90,26 +92,27 @@ func (memory *Memory) DeleteByCapabilityHash(_ context.Context, hash []byte) (do
 	return domain.Report{}, ErrNotFound
 }
 
-func (memory *Memory) Expired(_ context.Context, before time.Time, limit int) ([]domain.Report, error) {
+func (memory *Memory) Deleted(_ context.Context, limit int) ([]domain.Report, error) {
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
 	result := make([]domain.Report, 0, limit)
 	for _, report := range memory.reports {
-		if report.DeletedAt != nil || !report.RetentionUntil.After(before) {
+		if report.DeletedAt != nil {
 			result = append(result, report)
-			if len(result) == limit {
-				break
-			}
 		}
+	}
+	sort.SliceStable(result, func(left, right int) bool { return result[left].DeletedAt.Before(*result[right].DeletedAt) })
+	if len(result) > limit {
+		result = result[:limit]
 	}
 	return result, nil
 }
 
-func (memory *Memory) Purge(_ context.Context, id string, before time.Time) error {
+func (memory *Memory) PurgeDeleted(_ context.Context, id string) error {
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
 	for index, report := range memory.reports {
-		if report.ID == id && (report.DeletedAt != nil || !report.RetentionUntil.After(before)) {
+		if report.ID == id && report.DeletedAt != nil {
 			memory.reports = append(memory.reports[:index], memory.reports[index+1:]...)
 			keptMessages := memory.messages[:0]
 			for _, message := range memory.messages {
@@ -122,6 +125,22 @@ func (memory *Memory) Purge(_ context.Context, id string, before time.Time) erro
 		}
 	}
 	return ErrNotFound
+}
+
+func (memory *Memory) DiagnosticReferences(_ context.Context, afterID string, limit int) ([]domain.DiagnosticReference, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	result := make([]domain.DiagnosticReference, 0, limit)
+	for _, report := range memory.reports {
+		if report.DeletedAt == nil && report.DiagnosticObjectKey != nil && report.ID > afterID {
+			result = append(result, domain.DiagnosticReference{ReportID: report.ID, ObjectKey: *report.DiagnosticObjectKey})
+		}
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left].ReportID < result[right].ReportID })
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
 }
 
 func (memory *Memory) AdminList(_ context.Context, status *domain.ReportStatus, limit, offset int) ([]domain.Report, int, error) {
@@ -159,6 +178,19 @@ func (memory *Memory) AdminUpdateStatus(_ context.Context, id string, status dom
 	for index, report := range memory.reports {
 		if report.ID == id && report.DeletedAt == nil {
 			memory.reports[index].Status = status
+			memory.reports[index].UpdatedAt = now
+			return memory.reports[index], nil
+		}
+	}
+	return domain.Report{}, ErrNotFound
+}
+
+func (memory *Memory) AdminDelete(_ context.Context, id string, now time.Time) (domain.Report, error) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	for index, report := range memory.reports {
+		if report.ID == id && report.DeletedAt == nil {
+			memory.reports[index].DeletedAt = &now
 			memory.reports[index].UpdatedAt = now
 			return memory.reports[index], nil
 		}
@@ -249,6 +281,18 @@ func (memory *Memory) DeleteExpiredAdminSessions(_ context.Context, now time.Tim
 	return nil
 }
 
-func (memory *Memory) RecordAdminAudit(_ context.Context, _ domain.AdminAudit) error { return nil }
+func (memory *Memory) RecordAdminAudit(_ context.Context, audit domain.AdminAudit) error {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	memory.audits = append(memory.audits, audit)
+	return nil
+}
+
+// AdminAudits returns a copy of the recorded audit trail for tests.
+func (memory *Memory) AdminAudits() []domain.AdminAudit {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	return append([]domain.AdminAudit(nil), memory.audits...)
+}
 
 func (memory *Memory) Close() {}

@@ -76,7 +76,7 @@ async function sendReply() {
           <div><dt>Product</dt><dd>{{ report.productId }}</dd></div>
           <div><dt>Request</dt><dd>{{ report.requestType }}</dd></div>
           <div><dt>Submitted</dt><dd>{{ formatDate(report.createdAt, true) }}</dd></div>
-          <div><dt>Private data expires</dt><dd>{{ formatDate(report.retentionUntil) }}</dd></div>
+          <div><dt>Retention</dt><dd>Kept until deleted</dd></div>
         </dl>
         <div v-if="!deleted" class="private-copy"><h2>Conversation</h2>
           <p v-if="report.messages.length === 0">Support has not sent any messages yet.</p>

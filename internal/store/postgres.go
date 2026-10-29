@@ -49,12 +49,12 @@ func (postgres *Postgres) Create(ctx context.Context, report domain.Report) erro
 		INSERT INTO support_reports (
 			id, support_code, product_id, request_type, status, private_payload,
 			capability_ciphertext, diagnostic_object_key, idempotency_hash, request_hash,
-			capability_hash, created_at, updated_at, retention_until
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+			capability_hash, created_at, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 		report.ID, report.SupportCode, report.ProductID, report.RequestType, report.Status,
 		report.PrivatePayload, report.CapabilityCiphertext, report.DiagnosticObjectKey,
 		report.IdempotencyHash, report.RequestHash, report.CapabilityHash, report.CreatedAt,
-		report.UpdatedAt, report.RetentionUntil,
+		report.UpdatedAt,
 	)
 	var postgresError *pgconn.PgError
 	if errors.As(err, &postgresError) && postgresError.Code == "23505" {
@@ -128,10 +128,10 @@ func (postgres *Postgres) DeleteByCapabilityHash(ctx context.Context, hash []byt
 		capability_hash, created_at, updated_at, retention_until, deleted_at`, now, hash))
 }
 
-func (postgres *Postgres) Expired(ctx context.Context, before time.Time, limit int) ([]domain.Report, error) {
+func (postgres *Postgres) Deleted(ctx context.Context, limit int) ([]domain.Report, error) {
 	rows, err := postgres.pool.Query(ctx, reportSelect+`
-		WHERE deleted_at IS NOT NULL OR retention_until <= $1
-		ORDER BY retention_until ASC LIMIT $2`, before, limit)
+		WHERE deleted_at IS NOT NULL
+		ORDER BY deleted_at ASC, id ASC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -147,9 +147,9 @@ func (postgres *Postgres) Expired(ctx context.Context, before time.Time, limit i
 	return reports, rows.Err()
 }
 
-func (postgres *Postgres) Purge(ctx context.Context, id string, before time.Time) error {
+func (postgres *Postgres) PurgeDeleted(ctx context.Context, id string) error {
 	result, err := postgres.pool.Exec(ctx, `DELETE FROM support_reports
-		WHERE id = $1 AND (deleted_at IS NOT NULL OR retention_until <= $2)`, id, before)
+		WHERE id = $1 AND deleted_at IS NOT NULL`, id)
 	if err != nil {
 		return err
 	}
@@ -157,6 +157,25 @@ func (postgres *Postgres) Purge(ctx context.Context, id string, before time.Time
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (postgres *Postgres) DiagnosticReferences(ctx context.Context, afterID string, limit int) ([]domain.DiagnosticReference, error) {
+	rows, err := postgres.pool.Query(ctx, `SELECT id::text, diagnostic_object_key FROM support_reports
+		WHERE deleted_at IS NULL AND diagnostic_object_key IS NOT NULL AND id > $1::uuid
+		ORDER BY id ASC LIMIT $2`, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	references := make([]domain.DiagnosticReference, 0, limit)
+	for rows.Next() {
+		var reference domain.DiagnosticReference
+		if err := rows.Scan(&reference.ReportID, &reference.ObjectKey); err != nil {
+			return nil, err
+		}
+		references = append(references, reference)
+	}
+	return references, rows.Err()
 }
 
 func (postgres *Postgres) AdminList(ctx context.Context, status *domain.ReportStatus, limit, offset int) ([]domain.Report, int, error) {
@@ -197,6 +216,14 @@ func (postgres *Postgres) AdminUpdateStatus(ctx context.Context, id string, stat
 		RETURNING id, support_code, product_id, request_type, status, private_payload,
 		capability_ciphertext, diagnostic_object_key, idempotency_hash, request_hash,
 		capability_hash, created_at, updated_at, retention_until, deleted_at`, status, now, id))
+}
+
+func (postgres *Postgres) AdminDelete(ctx context.Context, id string, now time.Time) (domain.Report, error) {
+	return scanReport(postgres.pool.QueryRow(ctx, `UPDATE support_reports SET deleted_at = $1, updated_at = $1
+		WHERE id = $2 AND deleted_at IS NULL
+		RETURNING id, support_code, product_id, request_type, status, private_payload,
+		capability_ciphertext, diagnostic_object_key, idempotency_hash, request_hash,
+		capability_hash, created_at, updated_at, retention_until, deleted_at`, now, id))
 }
 
 func (postgres *Postgres) AddMessage(ctx context.Context, message domain.Message, status *domain.ReportStatus, now time.Time) (domain.Report, error) {

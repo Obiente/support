@@ -180,24 +180,6 @@ func TestPrivateConversationEncryptsMessagesAndUpdatesStatus(t *testing.T) {
 	}
 }
 
-func TestPurgeExpiredRemovesEncryptedObjectAndRow(t *testing.T) {
-	service, reports, objects := testService(t)
-	submission := validSubmission(t)
-	if _, err := service.Submit(context.Background(), submission); err != nil {
-		t.Fatal(err)
-	}
-	service.now = func() time.Time { return time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC) }
-	if err := service.PurgeExpired(context.Background(), 100); err != nil {
-		t.Fatal(err)
-	}
-	if len(objects.Values) != 0 {
-		t.Fatalf("private object count after retention = %d", len(objects.Values))
-	}
-	if _, err := reports.ByIdempotencyHash(context.Background(), hash([]byte(submission.IdempotencyKey))); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("retained row error = %v, want ErrNotFound", err)
-	}
-}
-
 func TestAdminReviewDecryptsOnlyRequestedPrivateData(t *testing.T) {
 	service, _, _ := testService(t)
 	receipt, err := service.Submit(context.Background(), validSubmission(t))
@@ -236,7 +218,7 @@ func testService(t *testing.T) (*Service, *store.Memory, *store.MemoryObjects) {
 		t.Fatal(err)
 	}
 	registry, err := products.New([]products.Product{{
-		ID: "synthetic-product", Name: "Synthetic product", RetentionDays: 7,
+		ID: "synthetic-product", Name: "Synthetic product",
 		DiagnosticContentTypes: []string{"application/zip"}, DiagnosticEntries: []string{"diagnostic.txt"},
 		DiagnosticMaxBytes: 4096, DiagnosticMaxExpanded: 2048,
 	}})
